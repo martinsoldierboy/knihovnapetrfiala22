@@ -1,11 +1,12 @@
 /**
  * LocalStorage Service for Scanned Books Management
+ * Implements MDT (Mezinárodní desetinné třídění) sorting logic.
  */
 
 const STORAGE_KEY = 'naskenovane_knihy';
 
 /**
- * Gets all saved books, sorted by ISBN number (ascending)
+ * Gets all saved books, sorted primarily by MDT classification code (ascending)
  */
 export function getSavedBooks() {
   try {
@@ -13,13 +14,15 @@ export function getSavedBooks() {
     const books = data ? JSON.parse(data) : [];
 
     return books.sort((a, b) => {
+      const mdtA = (a.mdt || '82-3 (Krásná literatura - Próza)').trim();
+      const mdtB = (b.mdt || '82-3 (Krásná literatura - Próza)').trim();
+
+      const mdtCompare = mdtA.localeCompare(mdtB, undefined, { numeric: true, sensitivity: 'base' });
+      if (mdtCompare !== 0) return mdtCompare;
+
+      // Secondary fallback sorting by ISBN
       const isbnA = (a.isbn || '').replace(/[-\s]/g, '');
       const isbnB = (b.isbn || '').replace(/[-\s]/g, '');
-
-      if (isbnA && !isbnB) return -1;
-      if (!isbnA && isbnB) return 1;
-      if (!isbnA && !isbnB) return (a.title || '').localeCompare(b.title || '');
-
       return isbnA.localeCompare(isbnB, undefined, { numeric: true, sensitivity: 'base' });
     });
   } catch (error) {
@@ -36,9 +39,11 @@ export function saveBook(book) {
   try {
     const books = getSavedBooks();
 
-    // Check if book with same ISBN or ID already exists
+    // Check if book with same ISBN, ID, or title already exists
     const existingIndex = books.findIndex(
-      b => (b.isbn && book.isbn && b.isbn === book.isbn) || b.id === book.id
+      b => (b.isbn && book.isbn && b.isbn === book.isbn) ||
+           b.id === book.id ||
+           (b.title && book.title && b.title.toLowerCase() === book.title.toLowerCase())
     );
 
     const timestamp = new Date().toISOString();

@@ -4,7 +4,7 @@ import BookList from './components/BookList';
 import BookDetailModal from './components/BookDetailModal';
 import { searchBook } from './services/bookApi';
 import { getSavedBooks, saveBook, removeBook } from './services/storage';
-import { BookOpen, List, Search, Loader2, CheckCircle2, AlertCircle, Scan, Sparkles } from 'lucide-react';
+import { BookOpen, List, Search, Loader2, CheckCircle2, AlertCircle, Scan, Sparkles, Tag } from 'lucide-react';
 
 export default function App() {
   const [currentView, setCurrentView] = useState('scanner'); // 'scanner' | 'list'
@@ -48,7 +48,7 @@ export default function App() {
       if (result.isDuplicate) {
         setSuccessMsg(`Kniha "${bookData.title}" již byla v seznamu.`);
       } else {
-        setSuccessMsg(`Kniha "${bookData.title}" byla úspěšně uložena do seznamu!`);
+        setSuccessMsg(`Kniha "${bookData.title}" byla úspěšně uložena (MDT: ${bookData.mdt})!`);
       }
 
       setSelectedBook(result.book);
@@ -96,7 +96,7 @@ export default function App() {
             </div>
             <div className="min-w-0">
               <h1 className="text-base sm:text-lg font-bold leading-none truncate">Skenování Knih</h1>
-              <p className="text-[10px] sm:text-xs text-slate-400 mt-0.5 truncate">Android Skener &amp; Databáze</p>
+              <p className="text-[10px] sm:text-xs text-slate-400 mt-0.5 truncate">MDT Řazení &amp; ISBN/Název</p>
             </div>
           </div>
 
@@ -121,13 +121,13 @@ export default function App() {
             {/* Mobile Header info */}
             <div className="text-center space-y-1.5">
               <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-800 font-medium text-[11px] sm:text-xs">
-                <Sparkles className="w-3 h-3 text-emerald-600" /> Rozpoznání knih z Google Books &amp; Open Library
+                <Sparkles className="w-3 h-3 text-emerald-600" /> Rozpoznání podle ISBN i Náznaku názvu + MDT Třídění
               </span>
               <h2 className="text-xl sm:text-2xl font-bold text-slate-800">
-                Naskenujte čárový kód knihy
+                Naskenujte kód nebo zadejte název
               </h2>
               <p className="text-slate-600 text-xs sm:text-sm px-2">
-                Stiskněte tlačítko pro spuštění fotoaparátu Android nebo zadejte kód ručně.
+                Fotoaparát rozpozná kód ISBN i čárový kód, nebo zadejte kód/název ručně.
               </p>
             </div>
 
@@ -140,7 +140,7 @@ export default function App() {
             {isLoading && (
               <div className="p-3.5 sm:p-4 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-xl flex items-center justify-center gap-3 animate-pulse">
                 <Loader2 className="w-5 h-5 animate-spin text-emerald-600 flex-shrink-0" />
-                <span className="font-medium text-xs sm:text-sm">Vyhledávám podrobnosti v knižních databázích...</span>
+                <span className="font-medium text-xs sm:text-sm">Vyhledávám v internetových databázích...</span>
               </div>
             )}
 
@@ -171,12 +171,12 @@ export default function App() {
             {/* Manual ISBN / Search Input */}
             <div className="bg-white p-4 sm:p-5 rounded-xl border border-slate-200 shadow-sm space-y-3">
               <h3 className="font-semibold text-slate-800 text-xs sm:text-sm flex items-center gap-2">
-                <Search className="w-4 h-4 text-emerald-600" /> Ruční zadání knižního kódu nebo názvu
+                <Search className="w-4 h-4 text-emerald-600" /> Vyhledat podle ISBN čísla nebo názvu knihy
               </h3>
               <form onSubmit={handleManualSearchSubmit} className="flex flex-col xs:flex-row gap-2">
                 <input
                   type="text"
-                  placeholder="Vložte ISBN nebo název knihy..."
+                  placeholder="Vložte ISBN nebo název knihy (např. Malý princ)..."
                   value={manualQuery}
                   onChange={(e) => setManualQuery(e.target.value)}
                   className="flex-1 px-3.5 py-3 border border-slate-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 bg-slate-50 focus:bg-white"
@@ -197,7 +197,7 @@ export default function App() {
               <div className="pt-3 border-t border-slate-200">
                 <div className="flex items-center justify-between mb-2">
                   <h3 className="text-xs font-bold text-slate-700 uppercase tracking-wider">
-                    Naskenováno ({scannedBooks.length}) - dle ISBN
+                    Uložené knihy ({scannedBooks.length}) - Seřazeno dle MDT
                   </h3>
                   <button
                     onClick={() => setCurrentView('list')}
@@ -224,7 +224,11 @@ export default function App() {
                       <div className="min-w-0 flex-1">
                         <p className="font-bold text-xs text-slate-900 truncate">{book.title}</p>
                         <p className="text-[11px] text-emerald-700 font-medium truncate">{book.authors}</p>
-                        {book.isbn && <p className="text-[10px] text-slate-400 font-mono truncate">ISBN: {book.isbn}</p>}
+                        {book.mdt && (
+                          <p className="text-[10px] text-slate-500 font-bold truncate flex items-center gap-0.5">
+                            <Tag className="w-2.5 h-2.5 text-emerald-600 flex-shrink-0" /> {book.mdt}
+                          </p>
+                        )}
                       </div>
                     </div>
                   ))}

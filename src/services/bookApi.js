@@ -1,6 +1,60 @@
 /**
   Book Database lookup service (Google Books API & Open Library API)
+  Includes MDT (Mezinárodní desetinné třídění / UDC) classification logic.
  */
+
+/**
+ * Maps book categories/subjects, title, and description to MDT (UDC) classification
+ */
+export function deriveMdtClassification(categoriesStr = '', title = '', description = '') {
+  const text = `${categoriesStr} ${title} ${description}`.toLowerCase();
+
+  if (/pohádk|dětsk|pro děti|mládež|youth|children|juvenile|fairy/.test(text)) {
+    return '82-93 (Literatura pro děti a mládež)';
+  }
+  if (/poezie|básn|poetry|poems/.test(text)) {
+    return '82-1 (Poezie)';
+  }
+  if (/dram|divadl|play|theater|theatre/.test(text)) {
+    return '82-2 (Dramatická literatura)';
+  }
+  if (/beletrie|fiction|novel|román|povídk|příběh|proza|prose|literatura|literature|detektiv|thriller|scifi|sci-fi|fantasy/.test(text)) {
+    return '82-3 (Krásná literatura - Próza)';
+  }
+  if (/histori|dějin|historick|history|war|válka/.test(text)) {
+    return '94 (Dějiny / Historie)';
+  }
+  if (/geograf|zeměpis|cestopis|geography|travel/.test(text)) {
+    return '91 (Geografie / Cestopisy)';
+  }
+  if (/biograf|životopis|paměti|memoir|biography/.test(text)) {
+    return '929 (Biografie)';
+  }
+  if (/filosof|filozof|psycholog|philosophy|psychology/.test(text)) {
+    return '1 (Filosofie. Psychologie)';
+  }
+  if (/náboženství|teologie|religi|theology|bible|buddh/.test(text)) {
+    return '2 (Náboženství. Teologie)';
+  }
+  if (/společens|sociolog|právo|ekonom|politik|pedagog|law|economics|sociology|education/.test(text)) {
+    return '3 (Společenské vědy. Právo. Ekonomie)';
+  }
+  if (/matematik|přírodn|fyzik|chemie|biolog|astronom|math|physics|chemistry|biology|science/.test(text)) {
+    return '5 (Matematika. Přírodní vědy)';
+  }
+  if (/technik|počítač|informatik|lékař|medic|zdraví|zeměděl|computer|technology|medicine|engineering/.test(text)) {
+    return '6 (Uplatněné vědy. Technika. Lékařství)';
+  }
+  if (/umění|architektur|fotograf|hudba|sport|hry|art|music|sports/.test(text)) {
+    return '7 (Umění. Hudba. Sport)';
+  }
+  if (/jazyk|lingvist|slovník|language|linguistics|dictionary/.test(text)) {
+    return '81 (Jazykověda / Lingvistika)';
+  }
+
+  // Default fallback for general literature / fiction
+  return '82-3 (Krásná literatura - Próza)';
+}
 
 /**
  * Normalizes ISBN input string (removes hyphens and spaces)
@@ -36,16 +90,18 @@ export async function fetchFromGoogleBooks(query) {
     const book = data.items[0].volumeInfo;
     const industryIdentifiers = book.industryIdentifiers || [];
 
-    let isbn = clean;
+    let isbn = isIsbnLike(clean) ? clean : '';
     const isbn13Obj = industryIdentifiers.find(id => id.type === 'ISBN_13');
     const isbn10Obj = industryIdentifiers.find(id => id.type === 'ISBN_10');
     if (isbn13Obj) isbn = isbn13Obj.identifier;
     else if (isbn10Obj) isbn = isbn10Obj.identifier;
 
-    // Cover image high res if available
     const coverImage = book.imageLinks?.thumbnail
       ? book.imageLinks.thumbnail.replace('http://', 'https://')
       : null;
+
+    const categories = book.categories ? book.categories.join(', ') : '';
+    const mdt = deriveMdtClassification(categories, book.title, book.description);
 
     return {
       id: data.items[0].id || `gb-${Date.now()}`,
@@ -57,7 +113,8 @@ export async function fetchFromGoogleBooks(query) {
       description: book.description || 'Popis není k dispozici.',
       coverImage: coverImage,
       pageCount: book.pageCount || 0,
-      categories: book.categories ? book.categories.join(', ') : '',
+      categories: categories,
+      mdt: mdt,
       language: book.language || '',
       source: 'Google Books'
     };
@@ -82,6 +139,10 @@ export async function fetchFromOpenLibrary(query) {
         const key = `ISBN:${clean}`;
         if (data[key]) {
           const item = data[key];
+          const categories = item.subjects ? item.subjects.map(s => s.name).slice(0, 3).join(', ') : '';
+          const notes = typeof item.notes === 'string' ? item.notes : 'Popis není k dispozici.';
+          const mdt = deriveMdtClassification(categories, item.title, notes);
+
           return {
             id: `ol-${clean}`,
             title: item.title || 'Neznámý název',
@@ -89,10 +150,11 @@ export async function fetchFromOpenLibrary(query) {
             isbn: clean,
             publishedDate: item.publish_date || '',
             publisher: item.publishers ? item.publishers.map(p => p.name).join(', ') : '',
-            description: typeof item.notes === 'string' ? item.notes : 'Popis není k dispozici.',
+            description: notes,
             coverImage: item.cover?.medium || item.cover?.large || null,
             pageCount: item.number_of_pages || 0,
-            categories: item.subjects ? item.subjects.map(s => s.name).slice(0, 3).join(', ') : '',
+            categories: categories,
+            mdt: mdt,
             language: '',
             source: 'Open Library'
           };
@@ -100,7 +162,7 @@ export async function fetchFromOpenLibrary(query) {
       }
     }
 
-    // Fallback general search query
+    // Fallback general search query by title / query
     const searchUrl = `https://openlibrary.org/search.json?q=${encodeURIComponent(query)}&limit=1`;
     const searchResp = await fetch(searchUrl);
     if (!searchResp.ok) return null;
@@ -109,20 +171,23 @@ export async function fetchFromOpenLibrary(query) {
     if (!searchData.docs || searchData.docs.length === 0) return null;
 
     const doc = searchData.docs[0];
-    const foundIsbn = doc.isbn ? doc.isbn[0] : clean;
+    const foundIsbn = doc.isbn ? doc.isbn[0] : (isIsbnLike(clean) ? clean : '');
     const coverImage = doc.cover_i ? `https://covers.openlibrary.org/b/id/${doc.cover_i}-M.jpg` : null;
+    const categories = doc.subject ? doc.subject.slice(0, 3).join(', ') : '';
+    const mdt = deriveMdtClassification(categories, doc.title, '');
 
     return {
       id: doc.key || `ol-${Date.now()}`,
       title: doc.title || 'Neznámý název',
       authors: doc.author_name ? doc.author_name.join(', ') : 'Neznámý autor',
-      isbn: foundIsbn,
+      isbn: foundIsbn || query,
       publishedDate: doc.first_publish_year ? String(doc.first_publish_year) : '',
       publisher: doc.publisher ? doc.publisher[0] : '',
-      description: 'Popis není k dispozici v vyhledávání Open Library.',
+      description: 'Popis z vyhledávání Open Library.',
       coverImage: coverImage,
       pageCount: doc.number_of_pages_median || 0,
-      categories: doc.subject ? doc.subject.slice(0, 3).join(', ') : '',
+      categories: categories,
+      mdt: mdt,
       language: doc.language ? doc.language[0] : '',
       source: 'Open Library'
     };
@@ -133,7 +198,7 @@ export async function fetchFromOpenLibrary(query) {
 }
 
 /**
- * Fetch book details by ISBN or query trying Google Books first, then Open Library
+ * Fetch book details by ISBN code or book title search query
  */
 export async function searchBook(query) {
   if (!query || !query.trim()) return null;

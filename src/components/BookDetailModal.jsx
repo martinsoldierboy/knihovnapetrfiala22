@@ -1,5 +1,5 @@
 import React from 'react';
-import { X, BookOpen, Calendar, Building, Hash, Tag, Globe } from 'lucide-react';
+import { X, BookOpen, Calendar, Building, Hash, Tag, Globe, Bookmark } from 'lucide-react';
 
 export default function BookDetailModal({ book, onClose, onDelete }) {
   if (!book) return null;
@@ -47,6 +47,12 @@ export default function BookDetailModal({ book, onClose, onDelete }) {
               <p className="text-sm sm:text-base text-emerald-700 font-semibold">{book.authors || 'Neznámý autor'}</p>
 
               <div className="pt-2 text-xs sm:text-sm text-slate-600 space-y-1.5">
+                {book.mdt && (
+                  <div className="flex items-center gap-2 justify-center sm:justify-start text-emerald-900 font-bold bg-emerald-50 px-2.5 py-1 rounded-lg border border-emerald-200">
+                    <Bookmark className="w-4 h-4 text-emerald-600 flex-shrink-0" />
+                    <span><strong>MDT Třídění:</strong> {book.mdt}</span>
+                  </div>
+                )}
                 {book.publisher && (
                   <div className="flex items-center gap-2 justify-center sm:justify-start">
                     <Building className="w-4 h-4 text-slate-400 flex-shrink-0" />
