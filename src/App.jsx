@@ -122,7 +122,7 @@ export default function App() {
             {/* Header info */}
             <div className="text-center space-y-2">
               <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-100 text-emerald-800 font-medium text-xs">
-                <Sparkles className="w-3.5 h-3.5" /> Automatické rozpoznání z Google Books &amp; Open Library
+                <Sparkles className="w-3.5 h-3.5" /> Vyhledávání v Knihovny.cz, Google Books &amp; Open Library
               </span>
               <h2 className="text-2xl font-bold text-slate-800">
                 Naskenujte čárový kód knihy
@@ -259,7 +259,7 @@ export default function App() {
 
       {/* Footer */}
       <footer className="bg-white border-t border-slate-200 py-4 text-center text-xs text-slate-500">
-        <p>Aplikace na skenování knih &copy; {new Date().getFullYear()} - Google Books &amp; Open Library API</p>
+        <p>Aplikace na skenování knih &copy; {new Date().getFullYear()} - Katalog Knihovny.cz</p>
       </footer>
     </div>
   );
