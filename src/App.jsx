@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import BarcodeScanner from './components/BarcodeScanner';
 import BookList from './components/BookList';
 import BookDetailModal from './components/BookDetailModal';
@@ -14,7 +14,8 @@ export default function App() {
   const [successMsg, setSuccessMsg] = useState('');
   const [scannedBooks, setScannedBooks] = useState([]);
   const [selectedBook, setSelectedBook] = useState(null);
-  const [lastProcessedCode, setLastProcessedCode] = useState('');
+  const lastScanTimeRef = useRef(0);
+  const lastProcessedCodeRef = useRef('');
 
   // Load saved books on mount
   useEffect(() => {
@@ -61,9 +62,17 @@ export default function App() {
   };
 
   const handleBarcodeScanned = (code) => {
-    // Prevent repetitive immediate re-scans of the same code within a short buffer
-    if (code === lastProcessedCode && isLoading) return;
-    setLastProcessedCode(code);
+    if (!code) return;
+    const now = Date.now();
+    if (isLoading || selectedBook) return;
+
+    // Prevent immediate duplicate scans of the same barcode within 3 seconds
+    if (code === lastProcessedCodeRef.current && (now - lastScanTimeRef.current < 3000)) {
+      return;
+    }
+
+    lastScanTimeRef.current = now;
+    lastProcessedCodeRef.current = code;
     handleBookSearchAndSave(code);
   };
 
@@ -135,7 +144,8 @@ export default function App() {
             {/* Camera Scanner Component */}
             <BarcodeScanner
               onScanSuccess={handleBarcodeScanned}
-              isScanningActive={currentView === 'scanner' && !isLoading}
+              isScanningActive={currentView === 'scanner'}
+              disabled={isLoading || !!selectedBook}
             />
 
             {/* Loading Indicator */}

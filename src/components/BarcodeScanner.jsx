@@ -2,17 +2,36 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Html5Qrcode, Html5QrcodeSupportedFormats } from 'html5-qrcode';
 import { Camera, CameraOff, AlertCircle, RefreshCw } from 'lucide-react';
 
-export default function BarcodeScanner({ onScanSuccess, isScanningActive }) {
+export default function BarcodeScanner({ onScanSuccess, isScanningActive, disabled = false }) {
   const [isScanning, setIsScanning] = useState(false);
   const [cameraError, setCameraError] = useState(null);
-  const scannerRef = useRef(null);
   const html5QrcodeScanner = useRef(null);
+  const isOperatingRef = useRef(false);
+  const disabledRef = useRef(disabled);
+
+  useEffect(() => {
+    disabledRef.current = disabled;
+  }, [disabled]);
 
   const startScanner = async () => {
+    if (isOperatingRef.current) return;
+    isOperatingRef.current = true;
     setCameraError(null);
+
     try {
       if (!html5QrcodeScanner.current) {
         html5QrcodeScanner.current = new Html5Qrcode("reader");
+      }
+
+      let state = 1; // 1 = NOT_STARTED
+      try {
+        state = html5QrcodeScanner.current.getState();
+      } catch (e) {}
+
+      if (state === 2) { // SCANNING
+        setIsScanning(true);
+        isOperatingRef.current = false;
+        return;
       }
 
       const config = {
@@ -30,7 +49,9 @@ export default function BarcodeScanner({ onScanSuccess, isScanningActive }) {
         { facingMode: "environment" },
         config,
         (decodedText) => {
-          onScanSuccess(decodedText);
+          if (!disabledRef.current) {
+            onScanSuccess(decodedText);
+          }
         },
         () => {
           // Ignore parse errors on every frame
@@ -49,17 +70,31 @@ export default function BarcodeScanner({ onScanSuccess, isScanningActive }) {
       }
       setCameraError(errorMsg);
       setIsScanning(false);
+    } finally {
+      isOperatingRef.current = false;
     }
   };
 
   const stopScanner = async () => {
-    if (html5QrcodeScanner.current && isScanning) {
-      try {
-        await html5QrcodeScanner.current.stop();
-        setIsScanning(false);
-      } catch (err) {
-        console.error("Chyba při zastavení skeneru:", err);
+    if (isOperatingRef.current) return;
+    isOperatingRef.current = true;
+
+    try {
+      if (html5QrcodeScanner.current) {
+        let state = 1;
+        try {
+          state = html5QrcodeScanner.current.getState();
+        } catch (e) {}
+
+        if (state === 2 || state === 3) { // SCANNING or PAUSED
+          await html5QrcodeScanner.current.stop();
+        }
       }
+      setIsScanning(false);
+    } catch (err) {
+      console.error("Chyba při zastavení skeneru:", err);
+    } finally {
+      isOperatingRef.current = false;
     }
   };
 
@@ -71,8 +106,21 @@ export default function BarcodeScanner({ onScanSuccess, isScanningActive }) {
     }
 
     return () => {
-      if (html5QrcodeScanner.current && html5QrcodeScanner.current.isScanning) {
-        html5QrcodeScanner.current.stop().catch(() => {});
+      if (html5QrcodeScanner.current) {
+        try {
+          let state = 1;
+          try {
+            state = html5QrcodeScanner.current.getState();
+          } catch (e) {}
+
+          if (state === 2 || state === 3) {
+            html5QrcodeScanner.current.stop().then(() => {
+              try { html5QrcodeScanner.current?.clear(); } catch(e){}
+            }).catch(() => {});
+          } else {
+            try { html5QrcodeScanner.current?.clear(); } catch(e){}
+          }
+        } catch (e) {}
       }
     };
   }, [isScanningActive]);
