@@ -8,15 +8,26 @@ export default function BarcodeScanner({ onScanSuccess, isScanningActive, disabl
   const html5QrcodeScanner = useRef(null);
   const isOperatingRef = useRef(false);
   const disabledRef = useRef(disabled);
+  const mountedRef = useRef(true);
 
   useEffect(() => {
     disabledRef.current = disabled;
   }, [disabled]);
 
+  const waitForInflightOperation = async () => {
+    let attempts = 0;
+    while (isOperatingRef.current && attempts < 25) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      attempts++;
+    }
+  };
+
   const startScanner = async () => {
-    if (isOperatingRef.current) return;
+    await waitForInflightOperation();
+
+    if (!mountedRef.current) return;
     isOperatingRef.current = true;
-    setCameraError(null);
+    if (mountedRef.current) setCameraError(null);
 
     try {
       if (!html5QrcodeScanner.current) {
@@ -29,7 +40,7 @@ export default function BarcodeScanner({ onScanSuccess, isScanningActive, disabl
       } catch (e) {}
 
       if (state === 2) { // SCANNING
-        setIsScanning(true);
+        if (mountedRef.current) setIsScanning(true);
         isOperatingRef.current = false;
         return;
       }
@@ -41,42 +52,71 @@ export default function BarcodeScanner({ onScanSuccess, isScanningActive, disabl
           Html5QrcodeSupportedFormats.EAN_13,
           Html5QrcodeSupportedFormats.EAN_8,
           Html5QrcodeSupportedFormats.UPC_A,
-          Html5QrcodeSupportedFormats.CODE_128
+          Html5QrcodeSupportedFormats.UPC_E,
+          Html5QrcodeSupportedFormats.CODE_128,
+          Html5QrcodeSupportedFormats.CODE_39,
+          Html5QrcodeSupportedFormats.ITF,
+          Html5QrcodeSupportedFormats.CODABAR
         ]
       };
 
-      await html5QrcodeScanner.current.start(
-        { facingMode: "environment" },
-        config,
-        (decodedText) => {
-          if (!disabledRef.current) {
-            onScanSuccess(decodedText);
+      let startErr = null;
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        try {
+          await html5QrcodeScanner.current.start(
+            { facingMode: "environment" },
+            config,
+            (decodedText) => {
+              if (!disabledRef.current) {
+                onScanSuccess(decodedText);
+              }
+            },
+            () => {
+              // Ignore frame parse errors
+            }
+          );
+          startErr = null;
+          break;
+        } catch (err) {
+          startErr = err;
+          if (attempt < 3) {
+            await new Promise((r) => setTimeout(r, 300));
           }
-        },
-        () => {
-          // Ignore parse errors on every frame
         }
-      );
-      setIsScanning(true);
+      }
+
+      if (startErr) {
+        throw startErr;
+      }
+
+      if (mountedRef.current) {
+        setIsScanning(true);
+      }
     } catch (err) {
       console.error("Chyba při spuštění kamery:", err);
+      const errStr = String(err);
       let errorMsg = "Kameru se nepodařilo spustit.";
-      if (err?.name === "NotAllowedError" || String(err).includes("Permission")) {
+
+      if (err?.name === "NotAllowedError" || errStr.includes("Permission") || errStr.includes("NotAllowedError")) {
         errorMsg = "Povolte prosím přístup ke kameře v nastavení prohlížeče.";
-      } else if (err?.name === "NotFoundError" || String(err).includes("DevicesNotFoundError")) {
+      } else if (err?.name === "NotFoundError" || errStr.includes("NotFoundError") || errStr.includes("DevicesNotFoundError") || errStr.includes("Requested device")) {
         errorMsg = "Nebylo nalezeno žádné kamerové zařízení.";
       } else if (window.location.protocol !== 'https:' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
         errorMsg = "Kamera vyžaduje zabezpečené připojení HTTPS.";
       }
-      setCameraError(errorMsg);
-      setIsScanning(false);
+
+      if (mountedRef.current) {
+        setCameraError(errorMsg);
+        setIsScanning(false);
+      }
     } finally {
       isOperatingRef.current = false;
     }
   };
 
   const stopScanner = async () => {
-    if (isOperatingRef.current) return;
+    await waitForInflightOperation();
+
     isOperatingRef.current = true;
 
     try {
@@ -90,7 +130,9 @@ export default function BarcodeScanner({ onScanSuccess, isScanningActive, disabl
           await html5QrcodeScanner.current.stop();
         }
       }
-      setIsScanning(false);
+      if (mountedRef.current) {
+        setIsScanning(false);
+      }
     } catch (err) {
       console.error("Chyba při zastavení skeneru:", err);
     } finally {
@@ -99,31 +141,38 @@ export default function BarcodeScanner({ onScanSuccess, isScanningActive, disabl
   };
 
   useEffect(() => {
-    if (isScanningActive && !isScanning) {
+    mountedRef.current = true;
+
+    if (isScanningActive) {
       startScanner();
-    } else if (!isScanningActive && isScanning) {
+    } else {
       stopScanner();
     }
 
     return () => {
+      // noop
+    };
+  }, [isScanningActive]);
+
+  useEffect(() => {
+    mountedRef.current = true;
+
+    return () => {
+      mountedRef.current = false;
       if (html5QrcodeScanner.current) {
         try {
-          let state = 1;
-          try {
-            state = html5QrcodeScanner.current.getState();
-          } catch (e) {}
-
+          const state = html5QrcodeScanner.current.getState();
           if (state === 2 || state === 3) {
-            html5QrcodeScanner.current.stop().then(() => {
+            html5QrcodeScanner.current.stop().catch(() => {}).finally(() => {
               try { html5QrcodeScanner.current?.clear(); } catch(e){}
-            }).catch(() => {});
+            });
           } else {
             try { html5QrcodeScanner.current?.clear(); } catch(e){}
           }
         } catch (e) {}
       }
     };
-  }, [isScanningActive]);
+  }, []);
 
   return (
     <div className="w-full flex flex-col items-center bg-white p-4 rounded-xl shadow-md border border-slate-200">

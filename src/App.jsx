@@ -125,126 +125,126 @@ export default function App() {
 
       {/* Main Content Area */}
       <main className="flex-1 max-w-5xl w-full mx-auto p-4 md:p-6">
-        {currentView === 'scanner' ? (
-          <div className="space-y-6 max-w-2xl mx-auto">
+        <div className={currentView === 'scanner' ? 'space-y-6 max-w-2xl mx-auto' : 'hidden'}>
 
-            {/* Header info */}
-            <div className="text-center space-y-2">
-              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-100 text-emerald-800 font-medium text-xs">
-                <Sparkles className="w-3.5 h-3.5" /> Vyhledávání v Knihovny.cz, Google Books &amp; Open Library
-              </span>
-              <h2 className="text-2xl font-bold text-slate-800">
-                Naskenujte čárový kód knihy
-              </h2>
-              <p className="text-slate-600 text-sm">
-                Naměřte kameru na čárový kód (EAN / ISBN) na obálce nebo zadejte kód ručně.
-              </p>
+          {/* Header info */}
+          <div className="text-center space-y-2">
+            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-100 text-emerald-800 font-medium text-xs">
+              <Sparkles className="w-3.5 h-3.5" /> Vyhledávání v Knihovny.cz, Google Books &amp; Open Library
+            </span>
+            <h2 className="text-2xl font-bold text-slate-800">
+              Naskenujte čárový kód knihy
+            </h2>
+            <p className="text-slate-600 text-sm">
+              Naměřte kameru na čárový kód (EAN / ISBN) na obálce nebo zadejte kód ručně.
+            </p>
+          </div>
+
+          {/* Camera Scanner Component */}
+          <BarcodeScanner
+            onScanSuccess={handleBarcodeScanned}
+            isScanningActive={currentView === 'scanner'}
+            disabled={isLoading || !!selectedBook}
+          />
+
+          {/* Loading Indicator */}
+          {isLoading && (
+            <div className="p-4 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-xl flex items-center justify-center gap-3 animate-pulse">
+              <Loader2 className="w-5 h-5 animate-spin text-emerald-600" />
+              <span className="font-medium text-sm">Vyhledávám podrobnosti o knize v databázích...</span>
             </div>
+          )}
 
-            {/* Camera Scanner Component */}
-            <BarcodeScanner
-              onScanSuccess={handleBarcodeScanned}
-              isScanningActive={currentView === 'scanner'}
-              disabled={isLoading || !!selectedBook}
-            />
+          {/* Error Message */}
+          {errorMsg && (
+            <div className="p-4 bg-red-50 border border-red-200 text-red-800 rounded-xl flex items-center gap-3">
+              <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0" />
+              <span className="text-sm font-medium">{errorMsg}</span>
+            </div>
+          )}
 
-            {/* Loading Indicator */}
-            {isLoading && (
-              <div className="p-4 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-xl flex items-center justify-center gap-3 animate-pulse">
-                <Loader2 className="w-5 h-5 animate-spin text-emerald-600" />
-                <span className="font-medium text-sm">Vyhledávám podrobnosti o knize v databázích...</span>
+          {/* Success Message */}
+          {successMsg && (
+            <div className="p-4 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-xl flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <CheckCircle2 className="w-5 h-5 text-emerald-600 flex-shrink-0" />
+                <span className="text-sm font-medium">{successMsg}</span>
               </div>
-            )}
+              <button
+                onClick={() => setCurrentView('list')}
+                className="text-xs bg-emerald-600 text-white px-3 py-1.5 rounded-md font-medium hover:bg-emerald-700 transition"
+              >
+                Zobrazit seznam
+              </button>
+            </div>
+          )}
 
-            {/* Error Message */}
-            {errorMsg && (
-              <div className="p-4 bg-red-50 border border-red-200 text-red-800 rounded-xl flex items-center gap-3">
-                <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0" />
-                <span className="text-sm font-medium">{errorMsg}</span>
-              </div>
-            )}
+          {/* Manual ISBN / Search Input */}
+          <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm space-y-3">
+            <h3 className="font-semibold text-slate-800 text-sm flex items-center gap-2">
+              <Search className="w-4 h-4 text-emerald-600" /> Ruční zadání knižního kódu nebo názvu
+            </h3>
+            <form onSubmit={handleManualSearchSubmit} className="flex gap-2">
+              <input
+                type="text"
+                placeholder="Vložte ISBN (např. 9788020455826) nebo název knihy..."
+                value={manualQuery}
+                onChange={(e) => setManualQuery(e.target.value)}
+                className="flex-1 px-3.5 py-2.5 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 bg-slate-50 focus:bg-white"
+              />
+              <button
+                type="submit"
+                disabled={isLoading || !manualQuery.trim()}
+                className="bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-medium px-4 py-2.5 rounded-lg text-sm transition flex items-center gap-2"
+              >
+                {isLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
+                <span>Vyhledat</span>
+              </button>
+            </form>
+          </div>
 
-            {/* Success Message */}
-            {successMsg && (
-              <div className="p-4 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-xl flex items-center justify-between gap-3">
-                <div className="flex items-center gap-2">
-                  <CheckCircle2 className="w-5 h-5 text-emerald-600 flex-shrink-0" />
-                  <span className="text-sm font-medium">{successMsg}</span>
-                </div>
+          {/* Quick Preview of Recent Scans */}
+          {scannedBooks.length > 0 && (
+            <div className="pt-4 border-t border-slate-200">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-sm font-bold text-slate-700 uppercase tracking-wider">
+                  Poslední naskenované knihy
+                </h3>
                 <button
                   onClick={() => setCurrentView('list')}
-                  className="text-xs bg-emerald-600 text-white px-3 py-1.5 rounded-md font-medium hover:bg-emerald-700 transition"
+                  className="text-xs text-emerald-700 hover:text-emerald-800 font-semibold"
                 >
-                  Zobrazit seznam
+                  Zobrazit vše ({scannedBooks.length}) &rarr;
                 </button>
               </div>
-            )}
 
-            {/* Manual ISBN / Search Input */}
-            <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm space-y-3">
-              <h3 className="font-semibold text-slate-800 text-sm flex items-center gap-2">
-                <Search className="w-4 h-4 text-emerald-600" /> Ruční zadání knižního kódu nebo názvu
-              </h3>
-              <form onSubmit={handleManualSearchSubmit} className="flex gap-2">
-                <input
-                  type="text"
-                  placeholder="Vložte ISBN (např. 9788020455826) nebo název knihy..."
-                  value={manualQuery}
-                  onChange={(e) => setManualQuery(e.target.value)}
-                  className="flex-1 px-3.5 py-2.5 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 bg-slate-50 focus:bg-white"
-                />
-                <button
-                  type="submit"
-                  disabled={isLoading || !manualQuery.trim()}
-                  className="bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-medium px-4 py-2.5 rounded-lg text-sm transition flex items-center gap-2"
-                >
-                  {isLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
-                  <span>Vyhledat</span>
-                </button>
-              </form>
-            </div>
-
-            {/* Quick Preview of Recent Scans */}
-            {scannedBooks.length > 0 && (
-              <div className="pt-4 border-t border-slate-200">
-                <div className="flex items-center justify-between mb-3">
-                  <h3 className="text-sm font-bold text-slate-700 uppercase tracking-wider">
-                    Poslední naskenované knihy
-                  </h3>
-                  <button
-                    onClick={() => setCurrentView('list')}
-                    className="text-xs text-emerald-700 hover:text-emerald-800 font-semibold"
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                {scannedBooks.slice(0, 3).map((book) => (
+                  <div
+                    key={book.id}
+                    onClick={() => setSelectedBook(book)}
+                    className="bg-white p-3 rounded-lg border border-slate-200 hover:border-emerald-400 cursor-pointer flex items-center gap-3 transition shadow-sm"
                   >
-                    Zobrazit vše ({scannedBooks.length}) &rarr;
-                  </button>
-                </div>
-
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                  {scannedBooks.slice(0, 3).map((book) => (
-                    <div
-                      key={book.id}
-                      onClick={() => setSelectedBook(book)}
-                      className="bg-white p-3 rounded-lg border border-slate-200 hover:border-emerald-400 cursor-pointer flex items-center gap-3 transition shadow-sm"
-                    >
-                      <div className="w-10 h-14 bg-slate-100 rounded overflow-hidden flex-shrink-0 flex items-center justify-center">
-                        {book.coverImage ? (
-                          <img src={book.coverImage} alt={book.title} className="w-full h-full object-cover" />
-                        ) : (
-                          <BookOpen className="w-5 h-5 text-slate-300" />
-                        )}
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <p className="font-bold text-xs text-slate-900 truncate">{book.title}</p>
-                        <p className="text-[11px] text-emerald-700 font-medium truncate">{book.authors}</p>
-                      </div>
+                    <div className="w-10 h-14 bg-slate-100 rounded overflow-hidden flex-shrink-0 flex items-center justify-center">
+                      {book.coverImage ? (
+                        <img src={book.coverImage} alt={book.title} className="w-full h-full object-cover" />
+                      ) : (
+                        <BookOpen className="w-5 h-5 text-slate-300" />
+                      )}
                     </div>
-                  ))}
-                </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="font-bold text-xs text-slate-900 truncate">{book.title}</p>
+                      <p className="text-[11px] text-emerald-700 font-medium truncate">{book.authors}</p>
+                    </div>
+                  </div>
+                ))}
               </div>
-            )}
+            </div>
+          )}
 
-          </div>
-        ) : (
+        </div>
+
+        {currentView === 'list' && (
           <BookList
             books={scannedBooks}
             onSelectBook={setSelectedBook}

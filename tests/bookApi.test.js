@@ -1,18 +1,36 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  normalizeIsbn,
   isbn10ToIsbn13,
   normalizeToIsbn13,
+  isIsbnLike,
   cleanCatalogPunctuation,
   cleanAuthorName,
   parseKnihovnyAuthors,
   fetchFromKnihovnyCz
 } from '../src/services/bookApi.js';
 
-test('ISBN-10 to ISBN-13 conversion', () => {
+test('ISBN normalization and prefix removal', () => {
+  assert.equal(normalizeIsbn('9788025703670'), '9788025703670');
+  assert.equal(normalizeIsbn('978-80-257-0367-0'), '9788025703670');
+  assert.equal(normalizeIsbn('ISBN 978-80-257-0367-0'), '9788025703670');
+  assert.equal(normalizeIsbn('ISBN: 8025703672'), '8025703672');
+  assert.equal(normalizeIsbn('  isbn: 978 80 204 5582 6  '), '9788020455826');
+});
+
+test('ISBN-10 to ISBN-13 conversion and numeric detection', () => {
   assert.equal(isbn10ToIsbn13('80-257-0367-2'), '9788025703670');
   assert.equal(normalizeToIsbn13('80-257-0367-2'), '9788025703670');
+  assert.equal(normalizeToIsbn13('8025703672'), '9788025703670');
   assert.equal(normalizeToIsbn13('978-80-257-0367-0'), '9788025703670');
+  assert.equal(normalizeToIsbn13('9788025703670'), '9788025703670');
+
+  assert.equal(isIsbnLike('9788025703670'), true);
+  assert.equal(isIsbnLike('8025703672'), true);
+  assert.equal(isIsbnLike('0978802045582'), true); // 12-digit UPC code
+  assert.equal(isIsbnLike('ISBN 9788025703670'), true);
+  assert.equal(isIsbnLike('Karel Capek Valky s mloky'), false);
 });
 
 test('Clean catalog punctuation', () => {
@@ -35,7 +53,7 @@ test('Clean author name and parse Knihovny authors', () => {
   assert.equal(parseKnihovnyAuthors(mockAuthors), 'Jean de Nostredame');
 });
 
-test('Knihovny.cz sample response parsing', async () => {
+test('Knihovny.cz sample response parsing with raw numeric ISBN', async () => {
   const sampleResponse = {
     resultCount: 1,
     records: [{
@@ -74,7 +92,8 @@ test('Knihovny.cz sample response parsing', async () => {
   };
 
   try {
-    const result = await fetchFromKnihovnyCz('978-80-257-0367-0');
+    // Test searching with raw numeric digits (e.g. from camera scan)
+    const result = await fetchFromKnihovnyCz('9788025703670');
     assert.notEqual(result, null);
     assert.equal(result.id, 'mkp.3521868');
     assert.equal(result.title, 'Životy slavných a starých provensálských básníků, kteří žili v dobách hrabat z kraje Provença');

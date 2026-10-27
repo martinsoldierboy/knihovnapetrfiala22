@@ -3,11 +3,15 @@
  */
 
 /**
- * Normalizes ISBN input string (removes hyphens and spaces)
+ * Normalizes ISBN input string (removes prefixes like 'ISBN:', hyphens, and spaces)
  */
 export function normalizeIsbn(input) {
   if (!input) return '';
-  return input.replace(/[-\s]/g, '').trim();
+  return input
+    .trim()
+    .replace(/^isbn\s*:?\s*/i, '')
+    .replace(/[-\s]/g, '')
+    .trim();
 }
 
 /**
@@ -35,6 +39,9 @@ export function normalizeToIsbn13(input) {
   if (/^\d{13}$/.test(clean)) {
     return clean;
   }
+  if (/^\d{12}$/.test(clean)) {
+    return clean.startsWith('0') ? clean.slice(1) : clean;
+  }
   if (/^\d{9}[\dX]$/i.test(clean)) {
     return isbn10ToIsbn13(clean);
   }
@@ -42,11 +49,11 @@ export function normalizeToIsbn13(input) {
 }
 
 /**
- * Checks if the string looks like a valid ISBN-10 or ISBN-13 or barcode number
+ * Checks if the string looks like a valid ISBN-10, ISBN-13 or barcode number
  */
 export function isIsbnLike(input) {
   const clean = normalizeIsbn(input);
-  return /^\d{9}[\dX]$/i.test(clean) || /^\d{13}$/.test(clean);
+  return /^\d{9}[\dX]$/i.test(clean) || /^\d{12,13}$/.test(clean);
 }
 
 /**
@@ -121,7 +128,7 @@ export async function fetchFromKnihovnyCz(query) {
 
   const isIsbn = isIsbnLike(query);
   const targetIsbn13 = isIsbn ? normalizeToIsbn13(query) : null;
-  const searchLookfor = targetIsbn13 || query.trim();
+  const searchLookfor = targetIsbn13 || normalizeIsbn(query) || query.trim();
   const searchType = isIsbn ? 'ISN' : 'AllFields';
 
   const params = new URLSearchParams({
@@ -155,11 +162,10 @@ export async function fetchFromKnihovnyCz(query) {
       selectedRecord = records.find(rec => {
         if (!rec.isbns || !Array.isArray(rec.isbns)) return false;
         return rec.isbns.some(rawIsbn => {
-          // Extract clean digits/X from rawIsbn e.g. "978-80-257-0367-0" or "80-202-0468-7 (brož.)"
           const clean = normalizeIsbn(rawIsbn.replace(/\(.*?\)/g, ''));
-          return normalizeToIsbn13(clean) === targetIsbn13;
+          return normalizeToIsbn13(clean) === targetIsbn13 || clean === searchLookfor;
         });
-      });
+      }) || records.find(rec => rec.formats?.includes('0/BOOKS/')) || records[0];
     } else {
       // General search: prefer records with format "0/BOOKS/"
       selectedRecord = records.find(rec => rec.formats?.includes('0/BOOKS/')) || records[0];
@@ -196,7 +202,7 @@ export async function fetchFromKnihovnyCz(query) {
     }
 
     // Determine representative ISBN
-    let displayIsbn = targetIsbn13 || query;
+    let displayIsbn = targetIsbn13 || normalizeIsbn(query) || query;
     if (selectedRecord.isbns?.[0]) {
       const isbnMatch = selectedRecord.isbns[0].match(/[\d-X]+/i);
       if (isbnMatch) displayIsbn = isbnMatch[0];
@@ -229,20 +235,31 @@ export async function fetchFromKnihovnyCz(query) {
  */
 export async function fetchFromGoogleBooks(query) {
   const clean = normalizeIsbn(query);
-  const searchParam = isIsbnLike(clean) ? `isbn:${clean}` : encodeURIComponent(query);
+  const isIsbn = isIsbnLike(clean);
+  const targetIsbn = isIsbn ? normalizeToIsbn13(clean) : clean;
+
+  const searchParam = isIsbn ? `isbn:${targetIsbn}` : encodeURIComponent(query);
   const url = `https://www.googleapis.com/books/v1/volumes?q=${searchParam}`;
 
   try {
-    const response = await fetch(url);
+    let response = await fetch(url);
     if (!response.ok) return null;
-    const data = await response.json();
+    let data = await response.json();
+
+    if ((!data.items || data.items.length === 0) && isIsbn) {
+      const fallbackUrl = `https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(targetIsbn)}`;
+      const fallbackResp = await fetch(fallbackUrl);
+      if (fallbackResp.ok) {
+        data = await fallbackResp.json();
+      }
+    }
 
     if (!data.items || data.items.length === 0) return null;
 
     const book = data.items[0].volumeInfo;
     const industryIdentifiers = book.industryIdentifiers || [];
 
-    let isbn = clean;
+    let isbn = targetIsbn;
     const isbn13Obj = industryIdentifiers.find(id => id.type === 'ISBN_13');
     const isbn10Obj = industryIdentifiers.find(id => id.type === 'ISBN_10');
     if (isbn13Obj) isbn = isbn13Obj.identifier;
@@ -278,16 +295,18 @@ export async function fetchFromGoogleBooks(query) {
  */
 export async function fetchFromOpenLibrary(query) {
   const clean = normalizeIsbn(query);
+  const targetIsbn = isIsbnLike(clean) ? normalizeToIsbn13(clean) : clean;
 
   try {
     if (isIsbnLike(clean)) {
-      const url = `https://openlibrary.org/api/books?bibkeys=ISBN:${clean}&format=json&jscmd=data`;
+      const url = `https://openlibrary.org/api/books?bibkeys=ISBN:${clean},ISBN:${targetIsbn}&format=json&jscmd=data`;
       const response = await fetch(url);
       if (response.ok) {
         const data = await response.json();
-        const key = `ISBN:${clean}`;
-        if (data[key]) {
-          const item = data[key];
+        const key1 = `ISBN:${clean}`;
+        const key2 = `ISBN:${targetIsbn}`;
+        const item = data[key1] || data[key2];
+        if (item) {
           return {
             id: `ol-${clean}`,
             title: item.title || 'Neznámý název',
