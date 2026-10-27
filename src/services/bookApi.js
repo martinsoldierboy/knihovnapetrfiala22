@@ -57,6 +57,42 @@ export function isIsbnLike(input) {
 }
 
 /**
+ * Extracts candidate ISBN numbers (10 or 13 digits) from OCR or arbitrary text string
+ */
+export function extractIsbnFromText(text) {
+  if (!text) return null;
+
+  // Search for 13-digit ISBNs starting with 978 or 979 first
+  const isbn13Match = text.match(/(?:ISBN(?:-13)?:?\s*)?(97[89][-\s]?\d{1,5}[-\s]?\d{1,7}[-\s]?\d{1,7}[-\s]?[\dX])/i);
+  if (isbn13Match) {
+    const clean = normalizeIsbn(isbn13Match[1]);
+    if (/^\d{13}$/.test(clean)) return clean;
+  }
+
+  // General 13 digit sequence match
+  const raw13Match = text.match(/\b(97[89]\d{10})\b/);
+  if (raw13Match) {
+    return raw13Match[1];
+  }
+
+  // 10-digit ISBN match
+  const isbn10Match = text.match(/(?:ISBN(?:-10)?:?\s*)?(\d{1,5}[-\s]?\d{1,7}[-\s]?\d{1,7}[-\s]?[\dX])/i);
+  if (isbn10Match) {
+    const clean = normalizeIsbn(isbn10Match[1]);
+    if (/^\d{9}[\dX]$/i.test(clean)) return normalizeToIsbn13(clean);
+  }
+
+  // Match any consecutive sequence of 10-13 digits
+  const anyDigits = text.replace(/[^0-9X]/gi, '');
+  if (anyDigits.length >= 13) {
+    const candidate = anyDigits.slice(0, 13);
+    if (/^97[89]\d{10}$/.test(candidate)) return candidate;
+  }
+
+  return null;
+}
+
+/**
  * Cleans cataloging punctuation from strings (e.g. "Argo,", "Praha :", "[Praha] :")
  */
 export function cleanCatalogPunctuation(str) {
@@ -358,22 +394,77 @@ export async function fetchFromOpenLibrary(query) {
 }
 
 /**
+ * Helper to retrieve book cover image fallback when missing from primary source
+ */
+export async function fetchCoverImageFallback(isbn, title) {
+  const cleanIsbn = normalizeToIsbn13(isbn);
+
+  if (cleanIsbn && /^\d{13}$/.test(cleanIsbn)) {
+    // Try Open Library direct cover URL
+    const olCoverUrl = `https://covers.openlibrary.org/b/isbn/${cleanIsbn}-L.jpg`;
+    try {
+      const resp = await fetch(olCoverUrl, { method: 'HEAD' });
+      if (resp.ok && resp.headers.get('content-type')?.includes('image')) {
+        // Confirm image is not empty pixel
+        const contentLength = resp.headers.get('content-length');
+        if (!contentLength || parseInt(contentLength, 10) > 1000) {
+          return olCoverUrl;
+        }
+      }
+    } catch (e) {
+      // Ignore network HEAD failure
+    }
+
+    // Try Google Books API lookup for thumbnail image
+    const gbResult = await fetchFromGoogleBooks(cleanIsbn);
+    if (gbResult?.coverImage) {
+      return gbResult.coverImage;
+    }
+
+    // ObalkyKnih.cz direct image link fallback for Czech books
+    return `https://www.obalkyknih.cz/view?isbn=${cleanIsbn}`;
+  }
+
+  if (title) {
+    const gbResult = await fetchFromGoogleBooks(title);
+    if (gbResult?.coverImage) {
+      return gbResult.coverImage;
+    }
+  }
+
+  return null;
+}
+
+/**
  * Fetch book details by ISBN or query trying Knihovny.cz first, then Google Books, then Open Library
  */
 export async function searchBook(query) {
   if (!query || !query.trim()) return null;
 
+  let bookResult = null;
+
   // Try Knihovny.cz API first
-  const knihovnyResult = await fetchFromKnihovnyCz(query);
-  if (knihovnyResult) return knihovnyResult;
+  bookResult = await fetchFromKnihovnyCz(query);
 
   // Fallback to Google Books API
-  const googleResult = await fetchFromGoogleBooks(query);
-  if (googleResult) return googleResult;
+  if (!bookResult) {
+    bookResult = await fetchFromGoogleBooks(query);
+  }
 
   // Fallback to Open Library
-  const openLibraryResult = await fetchFromOpenLibrary(query);
-  if (openLibraryResult) return openLibraryResult;
+  if (!bookResult) {
+    bookResult = await fetchFromOpenLibrary(query);
+  }
 
-  return null;
+  if (!bookResult) return null;
+
+  // Ensure coverImage is populated if missing
+  if (!bookResult.coverImage && (bookResult.isbn || bookResult.title)) {
+    const fallbackCover = await fetchCoverImageFallback(bookResult.isbn, bookResult.title);
+    if (fallbackCover) {
+      bookResult.coverImage = fallbackCover;
+    }
+  }
+
+  return bookResult;
 }

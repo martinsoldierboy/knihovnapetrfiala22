@@ -5,11 +5,14 @@ import {
   isbn10ToIsbn13,
   normalizeToIsbn13,
   isIsbnLike,
+  extractIsbnFromText,
   cleanCatalogPunctuation,
   cleanAuthorName,
   parseKnihovnyAuthors,
-  fetchFromKnihovnyCz
+  fetchFromKnihovnyCz,
+  fetchCoverImageFallback
 } from '../src/services/bookApi.js';
+import { getMdtCategory, getMdtColorConfig, MDT_CLASSES } from '../src/services/mdtClassification.js';
 
 test('ISBN normalization and prefix removal', () => {
   assert.equal(normalizeIsbn('9788025703670'), '9788025703670');
@@ -31,6 +34,63 @@ test('ISBN-10 to ISBN-13 conversion and numeric detection', () => {
   assert.equal(isIsbnLike('0978802045582'), true); // 12-digit UPC code
   assert.equal(isIsbnLike('ISBN 9788025703670'), true);
   assert.equal(isIsbnLike('Karel Capek Valky s mloky'), false);
+});
+
+test('Extract ISBN numbers from OCR or printed text', () => {
+  assert.equal(extractIsbnFromText('ISBN 978-80-204-5582-6 cena 399 Kc'), '9788020455826');
+  assert.equal(extractIsbnFromText('Kniha RUR, ISBN: 80-257-0367-2 Vydavatelstvo Argo'), '9788025703670');
+  assert.equal(extractIsbnFromText('Text bez jakéhokoliv čísla kNIHY'), null);
+  assert.equal(extractIsbnFromText('9788020455826'), '9788020455826');
+});
+
+test('MDT category classification and genre color assignment', () => {
+  // Class 1 - Filozofie & Psychologie
+  const book1 = { title: 'Základy psychologie a etiky', categories: '' };
+  assert.equal(getMdtCategory(book1).code, '1');
+  assert.equal(getMdtCategory(book1).shortName, 'Filozofie & Psychologie');
+
+  // Class 5 - Přírodní vědy
+  const book5 = { title: 'Úvod do teoretické fyziky a matematiky', categories: '' };
+  assert.equal(getMdtCategory(book5).code, '5');
+
+  // Class 6 - Lékařství & Technika
+  const book6 = { title: 'Moderní lékařství a zdravotní péče', categories: '' };
+  assert.equal(getMdtCategory(book6).code, '6');
+
+  // Class 8 - Literatura & Beletrie
+  const book8 = { title: 'Válka s Mloky', categories: 'Beletrie' };
+  assert.equal(getMdtCategory(book8).code, '8');
+
+  // Explicit MDT property
+  const bookMdt = { title: 'Neznámý titul', mdt: '930.1' };
+  assert.equal(getMdtCategory(bookMdt).code, '9');
+
+  // Color config test
+  const color5 = getMdtColorConfig('5');
+  assert.equal(color5.hex, '#10b981');
+});
+
+test('Cover image fallback generation', async () => {
+  const globalFetchBackup = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    if (url.includes('covers.openlibrary.org')) {
+      return {
+        ok: true,
+        headers: new Map([
+          ['content-type', 'image/jpeg'],
+          ['content-length', '25000']
+        ])
+      };
+    }
+    return { ok: false };
+  };
+
+  try {
+    const coverUrl = await fetchCoverImageFallback('9788025703670', 'Životy slavných');
+    assert.equal(coverUrl, 'https://covers.openlibrary.org/b/isbn/9788025703670-L.jpg');
+  } finally {
+    globalThis.fetch = globalFetchBackup;
+  }
 });
 
 test('Clean catalog punctuation', () => {
