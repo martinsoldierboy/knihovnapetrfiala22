@@ -1,14 +1,20 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Html5Qrcode, Html5QrcodeSupportedFormats } from 'html5-qrcode';
-import { Camera, CameraOff, AlertCircle, RefreshCw } from 'lucide-react';
+import { Camera, CameraOff, AlertCircle, RefreshCw, FileText, Loader2 } from 'lucide-react';
+import { createWorker } from 'tesseract.js';
+import { extractIsbnFromText } from '../services/bookApi';
 
 export default function BarcodeScanner({ onScanSuccess, isScanningActive, disabled = false }) {
   const [isScanning, setIsScanning] = useState(false);
   const [cameraError, setCameraError] = useState(null);
+  const [isOcrProcessing, setIsOcrProcessing] = useState(false);
+  const [ocrStatus, setOcrStatus] = useState('');
   const html5QrcodeScanner = useRef(null);
   const isOperatingRef = useRef(false);
   const disabledRef = useRef(disabled);
   const mountedRef = useRef(true);
+  const tesseractWorkerRef = useRef(null);
+  const ocrIntervalRef = useRef(null);
 
   useEffect(() => {
     disabledRef.current = disabled;
@@ -19,6 +25,45 @@ export default function BarcodeScanner({ onScanSuccess, isScanningActive, disabl
     while (isOperatingRef.current && attempts < 25) {
       await new Promise((resolve) => setTimeout(resolve, 100));
       attempts++;
+    }
+  };
+
+  const processVideoFrameForTextIsbn = async () => {
+    if (disabledRef.current || isOcrProcessing) return;
+
+    try {
+      const videoElement = document.querySelector('#reader video');
+      if (!videoElement || videoElement.paused || videoElement.ended || !videoElement.videoWidth) {
+        return;
+      }
+
+      setIsOcrProcessing(true);
+      setOcrStatus('Čtení tištěných číslic ISBN...');
+
+      // Capture current video frame to canvas
+      const canvas = document.createElement('canvas');
+      canvas.width = videoElement.videoWidth;
+      canvas.height = videoElement.videoHeight;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(videoElement, 0, 0, canvas.width, canvas.height);
+
+      if (!tesseractWorkerRef.current) {
+        tesseractWorkerRef.current = await createWorker('eng');
+      }
+
+      const { data } = await tesseractWorkerRef.current.recognize(canvas);
+      const text = data?.text || '';
+
+      const detectedIsbn = extractIsbnFromText(text);
+      if (detectedIsbn && !disabledRef.current) {
+        setOcrStatus(`Nalezeno ISBN v textu: ${detectedIsbn}`);
+        onScanSuccess(detectedIsbn);
+      }
+    } catch (err) {
+      console.error('OCR chyba:', err);
+    } finally {
+      setIsOcrProcessing(false);
+      setTimeout(() => setOcrStatus(''), 2500);
     }
   };
 
@@ -47,7 +92,7 @@ export default function BarcodeScanner({ onScanSuccess, isScanningActive, disabl
 
       const config = {
         fps: 10,
-        qrbox: { width: 260, height: 160 },
+        qrbox: { width: 280, height: 180 },
         formatsToSupport: [
           Html5QrcodeSupportedFormats.EAN_13,
           Html5QrcodeSupportedFormats.EAN_8,
@@ -91,6 +136,12 @@ export default function BarcodeScanner({ onScanSuccess, isScanningActive, disabl
 
       if (mountedRef.current) {
         setIsScanning(true);
+
+        // Periodically run OCR on video frames every 4 seconds
+        if (ocrIntervalRef.current) clearInterval(ocrIntervalRef.current);
+        ocrIntervalRef.current = setInterval(() => {
+          processVideoFrameForTextIsbn();
+        }, 4000);
       }
     } catch (err) {
       console.error("Chyba při spuštění kamery:", err);
@@ -115,6 +166,11 @@ export default function BarcodeScanner({ onScanSuccess, isScanningActive, disabl
   };
 
   const stopScanner = async () => {
+    if (ocrIntervalRef.current) {
+      clearInterval(ocrIntervalRef.current);
+      ocrIntervalRef.current = null;
+    }
+
     await waitForInflightOperation();
 
     isOperatingRef.current = true;
@@ -159,6 +215,12 @@ export default function BarcodeScanner({ onScanSuccess, isScanningActive, disabl
 
     return () => {
       mountedRef.current = false;
+      if (ocrIntervalRef.current) {
+        clearInterval(ocrIntervalRef.current);
+      }
+      if (tesseractWorkerRef.current) {
+        tesseractWorkerRef.current.terminate().catch(() => {});
+      }
       if (html5QrcodeScanner.current) {
         try {
           const state = html5QrcodeScanner.current.getState();
@@ -183,12 +245,12 @@ export default function BarcodeScanner({ onScanSuccess, isScanningActive, disabl
           <div className="absolute inset-0 flex flex-col items-center justify-center text-white p-6 text-center bg-slate-800">
             <Camera className="w-16 h-16 text-emerald-400 mb-3 animate-pulse" />
             <p className="font-semibold text-lg mb-1">Kamera je připravena</p>
-            <p className="text-slate-300 text-sm mb-4">Naměřte čárový kód nebo ISBN na zadní straně knihy</p>
+            <p className="text-slate-300 text-sm mb-4">Naměřte čárový kód nebo samotná tištěná čísla ISBN na knize</p>
             <button
               onClick={startScanner}
               className="bg-emerald-600 hover:bg-emerald-500 text-white font-medium px-5 py-2.5 rounded-lg flex items-center gap-2 shadow-lg transition duration-200"
             >
-              <Camera className="w-5 h-5" /> Zapnout skener
+              <Camera className="w-5 h-5" /> Zapnout skener &amp; OCR
             </button>
           </div>
         )}
@@ -211,20 +273,39 @@ export default function BarcodeScanner({ onScanSuccess, isScanningActive, disabl
       </div>
 
       {isScanning && (
-        <div className="mt-3 flex items-center justify-between w-full max-w-md px-2 text-sm text-slate-600">
-          <span className="flex items-center gap-2 text-emerald-600 font-medium">
-            <span className="relative flex h-3 w-3">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-              <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500"></span>
+        <div className="mt-3 flex flex-col gap-2 w-full max-w-md px-2 text-sm text-slate-600">
+          <div className="flex items-center justify-between">
+            <span className="flex items-center gap-2 text-emerald-600 font-medium text-xs sm:text-sm">
+              <span className="relative flex h-3 w-3">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500"></span>
+              </span>
+              Skener čárových kódů &amp; textových čísel ISBN aktivní
             </span>
-            Skener je aktivní...
-          </span>
-          <button
-            onClick={stopScanner}
-            className="text-xs text-slate-500 hover:text-slate-800 underline flex items-center gap-1"
-          >
-            <CameraOff className="w-3.5 h-3.5" /> Vypnout kameru
-          </button>
+            <button
+              onClick={stopScanner}
+              className="text-xs text-slate-500 hover:text-slate-800 underline flex items-center gap-1"
+            >
+              <CameraOff className="w-3.5 h-3.5" /> Vypnout
+            </button>
+          </div>
+
+          <div className="flex items-center justify-between pt-1 border-t border-slate-100">
+            <button
+              onClick={processVideoFrameForTextIsbn}
+              disabled={isOcrProcessing || disabled}
+              className="text-xs bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium px-3 py-1.5 rounded flex items-center gap-1.5 transition disabled:opacity-50"
+            >
+              {isOcrProcessing ? <Loader2 className="w-3.5 h-3.5 animate-spin text-emerald-600" /> : <FileText className="w-3.5 h-3.5 text-emerald-600" />}
+              <span>{isOcrProcessing ? 'Čtu čísla z obrázku...' : 'Přečíst tištěné číslo ISBN'}</span>
+            </button>
+
+            {ocrStatus && (
+              <span className="text-xs text-emerald-700 font-medium truncate max-w-[200px]">
+                {ocrStatus}
+              </span>
+            )}
+          </div>
         </div>
       )}
     </div>
