@@ -1,18 +1,25 @@
 import React from 'react';
-import { X, BookOpen, Calendar, Building, Hash, Tag, Globe, Bookmark } from 'lucide-react';
+import { X, BookOpen, Calendar, Building, Hash, Tag, Globe, Bookmark, Copy, Plus, Minus } from 'lucide-react';
 import { getMdtCategory } from '../services/mdtClassification';
+import { changeBookCount } from '../services/storage';
 
-export default function BookDetailModal({ book, onClose, onDelete }) {
+export default function BookDetailModal({ book, onClose, onDelete, onRefresh }) {
   if (!book) return null;
 
   const mdtCategory = getMdtCategory(book);
+  const bookCount = book.count || 1;
+
+  const handleAdjustCount = (delta) => {
+    changeBookCount(book.id, delta);
+    if (onRefresh) onRefresh();
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 overflow-y-auto">
-      <div className="bg-white w-full max-w-lg rounded-2xl shadow-2xl overflow-hidden border border-slate-200 animate-in fade-in zoom-in duration-200">
+      <div className="bg-white w-full max-w-lg rounded-2xl shadow-2xl border border-slate-200 animate-in fade-in zoom-in duration-200 flex flex-col max-h-[90vh]">
 
         {/* Header with MDT Accent border */}
-        <div className="bg-slate-900 text-white p-4 flex justify-between items-center relative">
+        <div className="bg-slate-900 text-white p-4 flex justify-between items-center relative flex-shrink-0">
           <div
             className="absolute top-0 left-0 right-0 h-1"
             style={{ backgroundColor: mdtCategory.hex }}
@@ -30,7 +37,7 @@ export default function BookDetailModal({ book, onClose, onDelete }) {
         </div>
 
         {/* Content */}
-        <div className="p-6 space-y-6 max-h-[80vh] overflow-y-auto">
+        <div className="p-6 space-y-5 overflow-y-auto flex-1">
           <div className="flex flex-col sm:flex-row gap-6 items-center sm:items-start">
             {/* Book Cover */}
             <div className="w-32 h-44 flex-shrink-0 bg-slate-100 rounded-lg overflow-hidden border border-slate-200 shadow-sm flex items-center justify-center relative">
@@ -52,6 +59,11 @@ export default function BookDetailModal({ book, onClose, onDelete }) {
                 <BookOpen className="w-10 h-10 mx-auto mb-1 opacity-40" />
                 Obálka nedostupná
               </div>
+              {bookCount > 1 && (
+                <span className="absolute top-1 left-1 bg-amber-500 text-white text-xs font-black px-2 py-0.5 rounded shadow">
+                  {bookCount}×
+                </span>
+              )}
             </div>
 
             {/* Main Info */}
@@ -68,6 +80,37 @@ export default function BookDetailModal({ book, onClose, onDelete }) {
 
               <h3 className="text-xl font-bold text-slate-900 leading-tight">{book.title}</h3>
               <p className="text-base text-emerald-700 font-semibold">{book.authors || 'Neznámý autor'}</p>
+
+              {/* Duplicate / Count Bar */}
+              <div className="p-2.5 bg-slate-50 border border-slate-200 rounded-lg flex items-center justify-between gap-3">
+                <div className="flex items-center gap-1.5 text-xs text-slate-700">
+                  <Copy className="w-4 h-4 text-emerald-600" />
+                  <span className="font-semibold">Počet kusů v knihovně:</span>
+                  <span className={`font-bold px-2 py-0.5 rounded text-xs ${bookCount > 1 ? 'bg-amber-100 text-amber-800' : 'bg-slate-200 text-slate-800'}`}>
+                    {bookCount} {bookCount === 1 ? 'kus' : bookCount < 5 ? 'kusy' : 'kusů'}
+                  </span>
+                </div>
+                <div className="flex items-center gap-1 bg-white border border-slate-300 rounded p-0.5 shadow-xs">
+                  <button
+                    type="button"
+                    onClick={() => handleAdjustCount(-1)}
+                    disabled={bookCount <= 1}
+                    className="p-1 rounded hover:bg-slate-100 disabled:opacity-30 text-slate-600 hover:text-slate-900"
+                    title="Odebrat kus"
+                  >
+                    <Minus className="w-3.5 h-3.5" />
+                  </button>
+                  <span className="px-1.5 font-bold text-xs">{bookCount}</span>
+                  <button
+                    type="button"
+                    onClick={() => handleAdjustCount(1)}
+                    className="p-1 rounded hover:bg-slate-100 text-slate-600 hover:text-slate-900"
+                    title="Přidat další kus"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
 
               <div className="pt-2 text-sm text-slate-600 space-y-1.5">
                 {book.publisher && (
@@ -116,13 +159,13 @@ export default function BookDetailModal({ book, onClose, onDelete }) {
 
           {book.scannedAt && (
             <p className="text-xs text-slate-400 text-right">
-              Naskenováno: {new Date(book.scannedAt).toLocaleString('cs-CZ')}
+              Poslední skenování: {new Date(book.scannedAt).toLocaleString('cs-CZ')}
             </p>
           )}
         </div>
 
         {/* Footer */}
-        <div className="bg-slate-50 px-6 py-4 border-t border-slate-200 flex justify-between items-center">
+        <div className="bg-slate-50 px-6 py-4 border-t border-slate-200 flex justify-between items-center flex-shrink-0">
           {onDelete && (
             <button
               onClick={() => onDelete(book.id)}
