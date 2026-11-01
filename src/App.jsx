@@ -4,7 +4,7 @@ import BookList from './components/BookList';
 import BookDetailModal from './components/BookDetailModal';
 import { searchBook } from './services/bookApi';
 import { getSavedBooks, saveBook, removeBook } from './services/storage';
-import { BookOpen, List, Search, Loader2, CheckCircle2, AlertCircle, Scan, Sparkles } from 'lucide-react';
+import { BookOpen, List, Search, Loader2, CheckCircle2, AlertCircle, Scan, Sparkles, Copy } from 'lucide-react';
 
 export default function App() {
   const [currentView, setCurrentView] = useState('scanner'); // 'scanner' | 'list'
@@ -25,7 +25,15 @@ export default function App() {
   const refreshBooks = () => {
     const books = getSavedBooks();
     setScannedBooks(books);
+    if (selectedBook) {
+      const updatedSelected = books.find(b => b.id === selectedBook.id);
+      if (updatedSelected) {
+        setSelectedBook(updatedSelected);
+      }
+    }
   };
+
+  const totalCopies = scannedBooks.reduce((sum, b) => sum + (b.count || 1), 0);
 
   const handleBookSearchAndSave = async (query) => {
     if (!query || !query.trim()) return;
@@ -47,7 +55,8 @@ export default function App() {
       refreshBooks();
 
       if (result.isDuplicate) {
-        setSuccessMsg(`Kniha "${bookData.title}" již byla v seznamu. Přesunuta na začátek!`);
+        const count = result.book.count || 2;
+        setSuccessMsg(`Kniha "${bookData.title}" již byla v seznamu. Počet kusů navýšen na ${count} ks!`);
       } else {
         setSuccessMsg(`Kniha "${bookData.title}" byla úspěšně uložena do seznamu!`);
       }
@@ -115,9 +124,9 @@ export default function App() {
             className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white font-medium px-4 py-2 rounded-lg text-sm shadow transition"
           >
             <List className="w-4 h-4" />
-            <span>Seznam naskenovaných knih</span>
-            <span className="bg-emerald-800 text-emerald-100 font-bold px-2 py-0.5 rounded-full text-xs ml-1">
-              {scannedBooks.length}
+            <span>Seznam knih</span>
+            <span className="bg-emerald-800 text-emerald-100 font-bold px-2 py-0.5 rounded-full text-xs ml-1" title={`${scannedBooks.length} titulů, celkem ${totalCopies} ks`}>
+              {scannedBooks.length} {totalCopies !== scannedBooks.length && `(${totalCopies} ks)`}
             </span>
           </button>
         </div>
@@ -136,7 +145,7 @@ export default function App() {
               Naskenujte čárový kód knihy
             </h2>
             <p className="text-slate-600 text-sm">
-              Naměřte kameru na čárový kód (EAN / ISBN) na obálce nebo zadejte kód ručně.
+              Naměřte kameru na čárový kód (EAN / ISBN) na obálce nebo zadejte kód ručně. Duplicitní skenování automaticky navýší počet kusů.
             </p>
           </div>
 
@@ -214,7 +223,7 @@ export default function App() {
                   onClick={() => setCurrentView('list')}
                   className="text-xs text-emerald-700 hover:text-emerald-800 font-semibold"
                 >
-                  Zobrazit vše ({scannedBooks.length}) &rarr;
+                  Zobrazit vše ({scannedBooks.length} titulů, {totalCopies} ks) &rarr;
                 </button>
               </div>
 
@@ -223,18 +232,32 @@ export default function App() {
                   <div
                     key={book.id}
                     onClick={() => setSelectedBook(book)}
-                    className="bg-white p-3 rounded-lg border border-slate-200 hover:border-emerald-400 cursor-pointer flex items-center gap-3 transition shadow-sm"
+                    className="bg-white p-3 rounded-lg border border-slate-200 hover:border-emerald-400 cursor-pointer flex items-center gap-3 transition shadow-sm relative group"
                   >
-                    <div className="w-10 h-14 bg-slate-100 rounded overflow-hidden flex-shrink-0 flex items-center justify-center">
+                    <div className="w-10 h-14 bg-slate-100 rounded overflow-hidden flex-shrink-0 flex items-center justify-center relative">
                       {book.coverImage ? (
                         <img src={book.coverImage} alt={book.title} className="w-full h-full object-cover" />
                       ) : (
                         <BookOpen className="w-5 h-5 text-slate-300" />
                       )}
+                      {(book.count > 1) && (
+                        <span className="absolute bottom-0 right-0 bg-amber-500 text-white text-[10px] font-bold px-1 rounded-tl shadow">
+                          {book.count}×
+                        </span>
+                      )}
                     </div>
                     <div className="min-w-0 flex-1">
                       <p className="font-bold text-xs text-slate-900 truncate">{book.title}</p>
                       <p className="text-[11px] text-emerald-700 font-medium truncate">{book.authors}</p>
+                      <div className="flex items-center gap-1.5 mt-0.5">
+                        {book.count > 1 ? (
+                          <span className="inline-flex items-center gap-0.5 text-[10px] font-semibold text-amber-700 bg-amber-50 px-1.5 py-0.2 rounded border border-amber-200">
+                            <Copy className="w-2.5 h-2.5" /> {book.count} ks
+                          </span>
+                        ) : (
+                          <span className="text-[10px] text-slate-400">1 ks</span>
+                        )}
+                      </div>
                     </div>
                   </div>
                 ))}
@@ -264,6 +287,7 @@ export default function App() {
             handleDeleteBook(id);
             setSelectedBook(null);
           }}
+          onRefresh={refreshBooks}
         />
       )}
 

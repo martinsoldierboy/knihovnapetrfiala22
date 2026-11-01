@@ -1,6 +1,7 @@
 /**
  * LocalStorage Service for Scanned Books Management
  */
+import { normalizeToIsbn13 } from './bookApi.js';
 
 const STORAGE_KEY = 'naskenovane_knihy';
 
@@ -10,7 +11,12 @@ const STORAGE_KEY = 'naskenovane_knihy';
 export function getSavedBooks() {
   try {
     const data = localStorage.getItem(STORAGE_KEY);
-    return data ? JSON.parse(data) : [];
+    const books = data ? JSON.parse(data) : [];
+    // Ensure all existing books have count initialized to at least 1
+    return books.map(book => ({
+      ...book,
+      count: typeof book.count === 'number' && book.count > 0 ? book.count : 1
+    }));
   } catch (error) {
     console.error('Chyba při načítání uložených knih:', error);
     return [];
@@ -18,7 +24,23 @@ export function getSavedBooks() {
 }
 
 /**
+ * Checks if two books have matching ISBNs or IDs
+ */
+export function isSameBook(b1, b2) {
+  if (!b1 || !b2) return false;
+  if (b1.id && b2.id && b1.id === b2.id) return true;
+
+  if (b1.isbn && b2.isbn) {
+    const isbn1 = normalizeToIsbn13(b1.isbn);
+    const isbn2 = normalizeToIsbn13(b2.isbn);
+    if (isbn1 && isbn2 && isbn1 === isbn2) return true;
+  }
+  return false;
+}
+
+/**
  * Saves a new book or updates existing
+ * When an existing book (same ISBN or ID) is scanned again, its count is incremented.
  * Returns object { success: boolean, isDuplicate: boolean, book: object }
  */
 export function saveBook(book) {
@@ -26,25 +48,35 @@ export function saveBook(book) {
     const books = getSavedBooks();
 
     // Check if book with same ISBN or ID already exists
-    const existingIndex = books.findIndex(
-      b => (b.isbn && book.isbn && b.isbn === book.isbn) || b.id === book.id
-    );
+    const existingIndex = books.findIndex(b => isSameBook(b, book));
 
     const timestamp = new Date().toISOString();
-    const bookToSave = {
-      ...book,
-      scannedAt: book.scannedAt || timestamp,
-      id: book.id || `book-${Date.now()}`
-    };
-
     let isDuplicate = false;
+    let bookToSave;
 
     if (existingIndex >= 0) {
       isDuplicate = true;
-      // Move to top and update scannedAt timestamp
+      const existingBook = books[existingIndex];
+      const newCount = (existingBook.count || 1) + (book.count || 1);
+
+      bookToSave = {
+        ...existingBook,
+        ...book,
+        id: existingBook.id || book.id || `book-${Date.now()}`,
+        count: newCount,
+        scannedAt: timestamp
+      };
+
+      // Move to top and update with new count and timestamp
       books.splice(existingIndex, 1);
       books.unshift(bookToSave);
     } else {
+      bookToSave = {
+        ...book,
+        count: typeof book.count === 'number' && book.count > 0 ? book.count : 1,
+        scannedAt: book.scannedAt || timestamp,
+        id: book.id || `book-${Date.now()}`
+      };
       books.unshift(bookToSave);
     }
 
@@ -53,6 +85,42 @@ export function saveBook(book) {
   } catch (error) {
     console.error('Chyba při ukládání knihy:', error);
     return { success: false, error };
+  }
+}
+
+/**
+ * Updates the copy count of a book by ID
+ */
+export function updateBookCount(id, count) {
+  try {
+    const books = getSavedBooks();
+    const target = books.find(b => b.id === id);
+    if (!target) return null;
+
+    target.count = Math.max(1, count);
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(books));
+    return target;
+  } catch (error) {
+    console.error('Chyba při změně počtu kusů knihy:', error);
+    return null;
+  }
+}
+
+/**
+ * Changes book copy count by a delta (+1 or -1)
+ */
+export function changeBookCount(id, delta) {
+  try {
+    const books = getSavedBooks();
+    const target = books.find(b => b.id === id);
+    if (!target) return null;
+
+    target.count = Math.max(1, (target.count || 1) + delta);
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(books));
+    return target;
+  } catch (error) {
+    console.error('Chyba při změně počtu kusů knihy:', error);
+    return null;
   }
 }
 

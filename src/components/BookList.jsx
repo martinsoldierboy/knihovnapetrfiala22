@@ -1,12 +1,14 @@
 import React, { useState } from 'react';
-import { Search, Trash2, Download, Upload, BookOpen, ChevronRight, ArrowLeft, Info, PlusCircle, Filter, Tag } from 'lucide-react';
-import { exportBooksToJson, importBooksFromJson } from '../services/storage';
+import { Search, Trash2, Download, Upload, BookOpen, ChevronRight, ArrowLeft, Info, PlusCircle, Filter, Tag, Copy, Plus, Minus } from 'lucide-react';
+import { exportBooksToJson, importBooksFromJson, changeBookCount } from '../services/storage';
 import { getMdtCategory, MDT_CLASSES } from '../services/mdtClassification';
 
 export default function BookList({ books, onSelectBook, onDeleteBook, onGoBack, onRefresh }) {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedMdtCode, setSelectedMdtCode] = useState('ALL');
   const [importStatus, setImportStatus] = useState(null);
+
+  const totalCopies = books.reduce((sum, b) => sum + (b.count || 1), 0);
 
   const filteredBooks = books.filter(book => {
     const term = searchTerm.toLowerCase();
@@ -46,6 +48,20 @@ export default function BookList({ books, onSelectBook, onDeleteBook, onGoBack, 
       setTimeout(() => setImportStatus(null), 4000);
     };
     reader.readAsText(file);
+  };
+
+  const handleIncrement = (e, book) => {
+    e.stopPropagation();
+    changeBookCount(book.id, 1);
+    onRefresh();
+  };
+
+  const handleDecrement = (e, book) => {
+    e.stopPropagation();
+    if (book.count > 1) {
+      changeBookCount(book.id, -1);
+      onRefresh();
+    }
   };
 
   return (
@@ -97,7 +113,9 @@ export default function BookList({ books, onSelectBook, onDeleteBook, onGoBack, 
               <BookOpen className="w-6 h-6 text-emerald-600" /> Databáze naskenovaných knih
             </h2>
             <p className="text-slate-500 text-sm">
-              Knihy roztříděny podle Mezinárodního desetinného třídění (MDT). Celkem: <span className="font-semibold text-slate-800">{books.length}</span>
+              Knihy roztříděny podle Mezinárodního desetinného třídění (MDT). Celkem: <span className="font-semibold text-slate-800">{books.length} {books.length === 1 ? 'titul' : books.length < 5 ? 'tituly' : 'titulů'}</span>
+              {' '}&bull;{' '}
+              <span className="font-semibold text-emerald-700">{totalCopies} {totalCopies === 1 ? 'kus' : totalCopies < 5 ? 'kusy' : 'kusů'}</span>
             </p>
           </div>
 
@@ -183,6 +201,7 @@ export default function BookList({ books, onSelectBook, onDeleteBook, onGoBack, 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {filteredBooks.map((book) => {
             const mdtCategory = getMdtCategory(book);
+            const bookCount = book.count || 1;
 
             return (
               <div
@@ -215,19 +234,36 @@ export default function BookList({ books, onSelectBook, onDeleteBook, onGoBack, 
                   >
                     <BookOpen className="w-8 h-8" />
                   </div>
+
+                  {bookCount > 1 && (
+                    <span className="absolute top-1 left-1 bg-amber-500 text-white text-[10px] font-extrabold px-1.5 py-0.5 rounded shadow">
+                      {bookCount}×
+                    </span>
+                  )}
                 </div>
 
                 {/* Info */}
                 <div className="flex-1 min-w-0 flex flex-col justify-between pl-1">
                   <div>
-                    {/* MDT Badge */}
-                    <div className="mb-1.5">
+                    {/* Header Tags */}
+                    <div className="mb-1.5 flex flex-wrap items-center gap-1.5">
                       <span
                         className={`inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-md border ${mdtCategory.badgeBg}`}
                       >
                         <Tag className="w-3 h-3" />
-                        MDT {mdtCategory.code}: {mdtCategory.shortName}
+                        MDT {mdtCategory.code}
                       </span>
+
+                      {bookCount > 1 ? (
+                        <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-md bg-amber-100 text-amber-800 border border-amber-300 shadow-xs">
+                          <Copy className="w-3 h-3" />
+                          {bookCount} ks (duplikát)
+                        </span>
+                      ) : (
+                        <span className="text-[11px] font-medium text-slate-500 bg-slate-100 px-2 py-0.5 rounded-md border border-slate-200">
+                          1 ks
+                        </span>
+                      )}
                     </div>
 
                     <h3 className="font-bold text-slate-900 line-clamp-2 text-base group-hover:text-emerald-600 transition">
@@ -249,7 +285,30 @@ export default function BookList({ books, onSelectBook, onDeleteBook, onGoBack, 
                   </div>
 
                   <div className="flex items-center justify-between mt-3 pt-2 border-t border-slate-100 text-xs text-slate-400">
-                    <span>{book.scannedAt ? new Date(book.scannedAt).toLocaleDateString('cs-CZ') : ''}</span>
+                    {/* Count increment/decrement controls */}
+                    <div className="flex items-center gap-1 bg-slate-50 border border-slate-200 rounded-lg p-0.5" onClick={(e) => e.stopPropagation()}>
+                      <button
+                        type="button"
+                        onClick={(e) => handleDecrement(e, book)}
+                        disabled={bookCount <= 1}
+                        className="w-5 h-5 flex items-center justify-center rounded hover:bg-slate-200 disabled:opacity-30 text-slate-700"
+                        title="Ubrat kus"
+                      >
+                        <Minus className="w-3 h-3" />
+                      </button>
+                      <span className="px-1 font-bold text-slate-800 text-[11px]" title="Počet kusů">
+                        {bookCount} ks
+                      </span>
+                      <button
+                        type="button"
+                        onClick={(e) => handleIncrement(e, book)}
+                        className="w-5 h-5 flex items-center justify-center rounded hover:bg-slate-200 text-slate-700"
+                        title="Přidat další kus"
+                      >
+                        <Plus className="w-3 h-3" />
+                      </button>
+                    </div>
+
                     <div className="flex items-center gap-2">
                       <button
                         onClick={(e) => {
