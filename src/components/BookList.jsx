@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
-import { Search, Trash2, Download, Upload, BookOpen, ChevronRight, ArrowLeft, Info, PlusCircle, Filter, Tag, Copy, Plus, Minus } from 'lucide-react';
+import { Search, Trash2, Download, Upload, BookOpen, ChevronRight, ArrowLeft, Info, PlusCircle, Filter, Tag, Copy, Plus, Minus, Star, ExternalLink } from 'lucide-react';
 import { exportBooksToJson, importBooksFromJson, changeBookCount } from '../services/storage';
 import { getMdtCategory, MDT_CLASSES } from '../services/mdtClassification';
+import { getDatabazeKnihUrl } from '../services/bookApi';
 
 export default function BookList({ books, onSelectBook, onDeleteBook, onGoBack, onRefresh }) {
   const [searchTerm, setSearchTerm] = useState('');
@@ -262,6 +263,13 @@ export default function BookList({ books, onSelectBook, onDeleteBook, onGoBack, 
                       ) : (
                         <span className="text-[11px] font-medium text-slate-500 bg-slate-100 px-2 py-0.5 rounded-md border border-slate-200">
                           1 ks
+                        </span>
+                      )}
+
+                      {book.rating != null && (
+                        <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-md bg-amber-50 text-amber-700 border border-amber-200">
+                          <Star className="w-3 h-3 fill-amber-400 text-amber-500" />
+                          {book.rating} %
                         </span>
                       )}
                     </div>

@@ -157,13 +157,13 @@ export default function App() {
           {/* Header info */}
           <div className="text-center space-y-2">
             <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-100 text-emerald-800 font-medium text-xs">
-              <Sparkles className="w-3.5 h-3.5" /> Vyhledávání v Knihovny.cz, Google Books &amp; Open Library
+              <Sparkles className="w-3.5 h-3.5" /> Vyhledávání autorů a knih v Knihovny.cz, Databázi knih &amp; ObálkyKnih
             </span>
             <h2 className="text-2xl font-bold text-slate-800">
               Naskenujte čárový kód knihy
             </h2>
             <p className="text-slate-600 text-sm">
-              Naměřte kameru na čárový kód (EAN / ISBN) na obálce nebo zadejte kód ručně. Duplicitní skenování automaticky navýší počet kusů.
+              Naměřte kameru na čárový kód (EAN / ISBN) na obálce, vyhledejte knihu podle názvu nebo napište jméno autora. Duplicitní skenování automaticky navýší počet kusů.
             </p>
           </div>
 
@@ -210,10 +210,10 @@ export default function App() {
           <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm space-y-3">
             <div className="flex items-center justify-between">
               <h3 className="font-semibold text-slate-800 text-sm flex items-center gap-2">
-                <Search className="w-4 h-4 text-emerald-600" /> Vyhledávání podle názvu nebo ISBN
+                <Search className="w-4 h-4 text-emerald-600" /> Vyhledávání podle autora, názvu nebo ISBN
               </h3>
               <span className="text-xs text-slate-400 hidden sm:inline">
-                Našeptávač titulů a různých vydání
+                Našeptávač autorů, titulů a různých vydání
               </span>
             </div>
             <BookSearchInput

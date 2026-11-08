@@ -1,13 +1,15 @@
 import React from 'react';
-import { X, BookOpen, Calendar, Building, Hash, Tag, Globe, Bookmark, Copy, Plus, Minus, ExternalLink } from 'lucide-react';
+import { X, BookOpen, Calendar, Building, Hash, Tag, Globe, Bookmark, Copy, Plus, Minus, ExternalLink, Star, FileText, Layers } from 'lucide-react';
 import { getMdtCategory } from '../services/mdtClassification';
 import { changeBookCount } from '../services/storage';
+import { getDatabazeKnihUrl } from '../services/bookApi';
 
 export default function BookDetailModal({ book, onClose, onDelete, onRefresh }) {
   if (!book) return null;
 
   const mdtCategory = getMdtCategory(book);
   const bookCount = book.count || 1;
+  const databazeKnihUrl = book.databazeKnihUrl || getDatabazeKnihUrl(book);
 
   const handleAdjustCount = (delta) => {
     changeBookCount(book.id, delta);
@@ -68,14 +70,21 @@ export default function BookDetailModal({ book, onClose, onDelete, onRefresh }) 
 
             {/* Main Info */}
             <div className="flex-1 text-center sm:text-left space-y-2">
-              {/* MDT Genre Tag */}
-              <div>
+              {/* MDT Genre Tag & Rating */}
+              <div className="flex flex-wrap items-center gap-2 justify-center sm:justify-start">
                 <span
                   className={`inline-flex items-center gap-1.5 text-xs font-bold px-2.5 py-1 rounded-md border ${mdtCategory.badgeBg}`}
                 >
                   <Bookmark className="w-3.5 h-3.5" />
                   MDT Třída {mdtCategory.code}: {mdtCategory.name}
                 </span>
+
+                {book.rating != null && (
+                  <span className="inline-flex items-center gap-1 text-xs font-bold px-2 py-0.5 rounded-md bg-amber-50 text-amber-800 border border-amber-300">
+                    <Star className="w-3.5 h-3.5 fill-amber-400 text-amber-500" />
+                    <span>{book.rating} % hodnocení</span>
+                  </span>
+                )}
               </div>
 
               <h3 className="text-xl font-bold text-slate-900 leading-tight">{book.title}</h3>
@@ -125,10 +134,28 @@ export default function BookDetailModal({ book, onClose, onDelete, onRefresh }) 
                     <span><strong>Rok vydání:</strong> {book.publishedDate}</span>
                   </div>
                 )}
+                {book.edition && (
+                  <div className="flex items-center gap-2 justify-center sm:justify-start">
+                    <Layers className="w-4 h-4 text-slate-400 flex-shrink-0" />
+                    <span><strong>Vydání:</strong> {book.edition}</span>
+                  </div>
+                )}
+                {book.pageCount > 0 && (
+                  <div className="flex items-center gap-2 justify-center sm:justify-start">
+                    <FileText className="w-4 h-4 text-slate-400 flex-shrink-0" />
+                    <span><strong>Rozsah:</strong> {book.pageCount} stran</span>
+                  </div>
+                )}
                 {book.isbn && (
                   <div className="flex items-center gap-2 justify-center sm:justify-start">
                     <Hash className="w-4 h-4 text-slate-400 flex-shrink-0" />
                     <span><strong>ISBN / Kód:</strong> {book.isbn}</span>
+                  </div>
+                )}
+                {book.language && (
+                  <div className="flex items-center gap-2 justify-center sm:justify-start">
+                    <Globe className="w-4 h-4 text-slate-400 flex-shrink-0" />
+                    <span><strong>Jazyk:</strong> {book.language}</span>
                   </div>
                 )}
                 {book.categories && (
@@ -137,26 +164,49 @@ export default function BookDetailModal({ book, onClose, onDelete, onRefresh }) 
                     <span><strong>Kategorie:</strong> {book.categories}</span>
                   </div>
                 )}
+
+                {/* External links to Czech book databases */}
+                <div className="pt-2 border-t border-slate-100 flex flex-wrap gap-2 justify-center sm:justify-start text-xs">
+                  {databazeKnihUrl && (
+                    <a
+                      href={databazeKnihUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-200 font-semibold transition"
+                    >
+                      <ExternalLink className="w-3.5 h-3.5 text-amber-700" />
+                      <span>DatabázeKnih.cz</span>
+                    </a>
+                  )}
+
+                  {book.knihovnyUrl && (
+                    <a
+                      href={book.knihovnyUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded bg-blue-50 hover:bg-blue-100 text-blue-900 border border-blue-200 font-semibold transition"
+                    >
+                      <ExternalLink className="w-3.5 h-3.5 text-blue-700" />
+                      <span>Knihovny.cz</span>
+                    </a>
+                  )}
+
+                  {(book.obalkyKnihUrl || (book.coverImage && book.coverImage.includes('obalkyknih.cz'))) && (
+                    <a
+                      href={book.obalkyKnihUrl || `https://www.obalkyknih.cz/view?isbn=${book.isbn}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded bg-emerald-50 hover:bg-emerald-100 text-emerald-900 border border-emerald-200 font-semibold transition"
+                    >
+                      <ExternalLink className="w-3.5 h-3.5 text-emerald-700" />
+                      <span>ObálkyKnih.cz</span>
+                    </a>
+                  )}
+                </div>
+
                 {book.source && (
-                  <div className="flex items-center gap-2 justify-center sm:justify-start text-xs text-slate-500 pt-1">
-                    <Globe className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
+                  <div className="flex items-center gap-2 justify-center sm:justify-start text-[11px] text-slate-400 pt-0.5">
                     <span>Zdroj dat: {book.source}</span>
-                  </div>
-                )}
-                {(book.obalkyKnihUrl || (book.coverImage && book.coverImage.includes('obalkyknih.cz'))) && (
-                  <div className="flex items-center gap-2 justify-center sm:justify-start text-xs text-slate-500 pt-0.5">
-                    <ExternalLink className="w-3.5 h-3.5 text-emerald-600 flex-shrink-0" />
-                    <span>
-                      Obálka:{' '}
-                      <a
-                        href={book.obalkyKnihUrl || `https://www.obalkyknih.cz/view?isbn=${book.isbn}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-emerald-700 hover:text-emerald-800 underline font-medium"
-                      >
-                        ObálkyKnih.cz
-                      </a>
-                    </span>
                   </div>
                 )}
               </div>
