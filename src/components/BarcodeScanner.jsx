@@ -6,12 +6,14 @@ import { extractIsbnFromText } from '../services/bookApi';
 
 export default function BarcodeScanner({ onScanSuccess, isScanningActive, disabled = false }) {
   const [isScanning, setIsScanning] = useState(false);
+  const [userStarted, setUserStarted] = useState(false);
   const [cameraError, setCameraError] = useState(null);
   const [isOcrProcessing, setIsOcrProcessing] = useState(false);
   const [ocrStatus, setOcrStatus] = useState('');
   const html5QrcodeScanner = useRef(null);
   const isOperatingRef = useRef(false);
   const disabledRef = useRef(disabled);
+  const userStartedRef = useRef(false);
   const mountedRef = useRef(true);
   const tesseractWorkerRef = useRef(null);
   const ocrIntervalRef = useRef(null);
@@ -19,6 +21,10 @@ export default function BarcodeScanner({ onScanSuccess, isScanningActive, disabl
   useEffect(() => {
     disabledRef.current = disabled;
   }, [disabled]);
+
+  useEffect(() => {
+    userStartedRef.current = userStarted;
+  }, [userStarted]);
 
   const waitForInflightOperation = async () => {
     let attempts = 0;
@@ -68,6 +74,11 @@ export default function BarcodeScanner({ onScanSuccess, isScanningActive, disabl
   };
 
   const startScanner = async () => {
+    if (disabledRef.current) return;
+
+    setUserStarted(true);
+    userStartedRef.current = true;
+
     await waitForInflightOperation();
 
     if (!mountedRef.current) return;
@@ -165,10 +176,15 @@ export default function BarcodeScanner({ onScanSuccess, isScanningActive, disabl
     }
   };
 
-  const stopScanner = async () => {
+  const stopScanner = async (resetUserStarted = false) => {
     if (ocrIntervalRef.current) {
       clearInterval(ocrIntervalRef.current);
       ocrIntervalRef.current = null;
+    }
+
+    if (resetUserStarted) {
+      setUserStarted(false);
+      userStartedRef.current = false;
     }
 
     await waitForInflightOperation();
@@ -199,10 +215,10 @@ export default function BarcodeScanner({ onScanSuccess, isScanningActive, disabl
   useEffect(() => {
     mountedRef.current = true;
 
-    if (isScanningActive) {
+    if (isScanningActive && userStartedRef.current) {
       startScanner();
     } else {
-      stopScanner();
+      stopScanner(false);
     }
 
     return () => {
@@ -243,14 +259,16 @@ export default function BarcodeScanner({ onScanSuccess, isScanningActive, disabl
 
         {!isScanning && !cameraError && (
           <div className="absolute inset-0 flex flex-col items-center justify-center text-white p-6 text-center bg-slate-800">
-            <Camera className="w-16 h-16 text-emerald-400 mb-3 animate-pulse" />
-            <p className="font-semibold text-lg mb-1">Kamera je připravena</p>
-            <p className="text-slate-300 text-sm mb-4">Naměřte čárový kód nebo samotná tištěná čísla ISBN na knize</p>
+            <Camera className="w-16 h-16 text-emerald-400 mb-3" />
+            <p className="font-semibold text-lg mb-1">Skener je připraven ke spuštění</p>
+            <p className="text-slate-300 text-sm mb-4 max-w-xs">
+              Kliknutím na tlačítko spustíte kameru pro skenování čárových kódů a čtení čísel ISBN.
+            </p>
             <button
               onClick={startScanner}
-              className="bg-emerald-600 hover:bg-emerald-500 text-white font-medium px-5 py-2.5 rounded-lg flex items-center gap-2 shadow-lg transition duration-200"
+              className="bg-emerald-600 hover:bg-emerald-500 text-white font-semibold px-5 py-2.5 rounded-lg flex items-center gap-2 shadow-lg transition duration-200 cursor-pointer"
             >
-              <Camera className="w-5 h-5" /> Zapnout skener &amp; OCR
+              <Camera className="w-5 h-5" /> Zapnout skener
             </button>
           </div>
         )}
@@ -283,8 +301,8 @@ export default function BarcodeScanner({ onScanSuccess, isScanningActive, disabl
               Skener čárových kódů &amp; textových čísel ISBN aktivní
             </span>
             <button
-              onClick={stopScanner}
-              className="text-xs text-slate-500 hover:text-slate-800 underline flex items-center gap-1"
+              onClick={() => stopScanner(true)}
+              className="text-xs text-slate-500 hover:text-slate-800 underline flex items-center gap-1 cursor-pointer"
             >
               <CameraOff className="w-3.5 h-3.5" /> Vypnout
             </button>
