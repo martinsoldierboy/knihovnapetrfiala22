@@ -9,6 +9,11 @@ import {
   cleanCatalogPunctuation,
   cleanAuthorName,
   parseKnihovnyAuthors,
+  formatKnihovnyRecord,
+  formatGoogleBooksItem,
+  searchKnihovnyCzList,
+  searchGoogleBooksList,
+  searchBooks,
   fetchFromKnihovnyCz,
   fetchCoverImageFallback
 } from '../src/services/bookApi.js';
@@ -88,6 +93,119 @@ test('Cover image fallback generation', async () => {
   try {
     const coverUrl = await fetchCoverImageFallback('9788025703670', 'Životy slavných');
     assert.equal(coverUrl, 'https://covers.openlibrary.org/b/isbn/9788025703670-L.jpg');
+  } finally {
+    globalThis.fetch = globalFetchBackup;
+  }
+});
+
+test('searchBooks returns distinct editions and records from Knihovny.cz and Google Books', async () => {
+  const sampleKnihovnyResponse = {
+    resultCount: 2,
+    records: [
+      {
+        id: 'rec-1',
+        title: 'Válka s Mloky',
+        authors: { primary: { 'Karel Čapek': [] } },
+        publishers: ['Fr. Borový'],
+        placesOfPublication: ['Praha'],
+        publicationDates: ['1936'],
+        physicalDescriptions: ['310 s.'],
+        isbns: ['9788025703670'],
+        formats: ['0/BOOKS/']
+      },
+      {
+        id: 'rec-2',
+        title: 'Válka s Mloky',
+        authors: { primary: { 'Karel Čapek': [] } },
+        publishers: ['Mladá fronta'],
+        placesOfPublication: ['Praha'],
+        publicationDates: ['1981'],
+        physicalDescriptions: ['280 s.'],
+        isbns: ['9788020455826'],
+        formats: ['0/BOOKS/']
+      }
+    ]
+  };
+
+  const globalFetchBackup = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    if (url.includes('knihovny.cz')) {
+      return {
+        ok: true,
+        json: async () => sampleKnihovnyResponse
+      };
+    }
+    return {
+      ok: true,
+      json: async () => ({ items: [] })
+    };
+  };
+
+  try {
+    const results = await searchBooks('Válka s Mloky');
+    assert.equal(results.length, 2);
+
+    // Verify first edition
+    assert.equal(results[0].title, 'Válka s Mloky');
+    assert.equal(results[0].publishedDate, '1936');
+    assert.equal(results[0].publisher, 'Fr. Borový (Praha)');
+    assert.equal(results[0].isbn, '9788025703670');
+    assert.equal(results[0].coverImage, 'https://www.obalkyknih.cz/view?isbn=9788025703670');
+
+    // Verify second edition
+    assert.equal(results[1].title, 'Válka s Mloky');
+    assert.equal(results[1].publishedDate, '1981');
+    assert.equal(results[1].publisher, 'Mladá fronta (Praha)');
+    assert.equal(results[1].isbn, '9788020455826');
+    assert.equal(results[1].coverImage, 'https://www.obalkyknih.cz/view?isbn=9788020455826');
+  } finally {
+    globalThis.fetch = globalFetchBackup;
+  }
+});
+
+test('searchBooks handles empty search and fallback to Google Books', async () => {
+  const globalFetchBackup = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    if (url.includes('knihovny.cz')) {
+      return {
+        ok: true,
+        json: async () => ({ records: [] })
+      };
+    }
+    if (url.includes('googleapis.com')) {
+      return {
+        ok: true,
+        json: async () => ({
+          items: [{
+            id: 'gb-123',
+            volumeInfo: {
+              title: '1984',
+              authors: ['George Orwell'],
+              publisher: 'Secker & Warburg',
+              publishedDate: '1949',
+              industryIdentifiers: [{ type: 'ISBN_13', identifier: '9780451524935' }],
+              imageLinks: { thumbnail: 'http://books.google.com/sample.jpg' }
+            }
+          }]
+        })
+      };
+    }
+    return { ok: false };
+  };
+
+  try {
+    const results = await searchBooks('1984');
+    assert.equal(results.length, 1);
+    assert.equal(results[0].title, '1984');
+    assert.equal(results[0].authors, 'George Orwell');
+    assert.equal(results[0].publishedDate, '1949');
+    assert.equal(results[0].isbn, '9780451524935');
+    assert.equal(results[0].coverImage, 'https://books.google.com/sample.jpg');
+    assert.equal(results[0].source, 'Google Books');
+
+    // Empty query test
+    const emptyRes = await searchBooks('');
+    assert.deepEqual(emptyRes, []);
   } finally {
     globalThis.fetch = globalFetchBackup;
   }

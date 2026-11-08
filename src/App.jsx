@@ -2,13 +2,13 @@ import React, { useState, useEffect, useRef } from 'react';
 import BarcodeScanner from './components/BarcodeScanner';
 import BookList from './components/BookList';
 import BookDetailModal from './components/BookDetailModal';
+import BookSearchInput from './components/BookSearchInput';
 import { searchBook } from './services/bookApi';
 import { getSavedBooks, saveBook, removeBook } from './services/storage';
 import { BookOpen, List, Search, Loader2, CheckCircle2, AlertCircle, Scan, Sparkles, Copy } from 'lucide-react';
 
 export default function App() {
   const [currentView, setCurrentView] = useState('scanner'); // 'scanner' | 'list'
-  const [manualQuery, setManualQuery] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
@@ -85,11 +85,29 @@ export default function App() {
     handleBookSearchAndSave(code);
   };
 
-  const handleManualSearchSubmit = (e) => {
-    e.preventDefault();
-    if (manualQuery.trim()) {
-      handleBookSearchAndSave(manualQuery.trim());
-      setManualQuery('');
+  const handleSelectBookDirectly = (bookOrQuery) => {
+    if (!bookOrQuery) return;
+
+    if (bookOrQuery.queryOnly) {
+      handleBookSearchAndSave(bookOrQuery.queryOnly);
+      return;
+    }
+
+    try {
+      const result = saveBook(bookOrQuery);
+      refreshBooks();
+
+      if (result.isDuplicate) {
+        const count = result.book.count || 2;
+        setSuccessMsg(`Kniha "${bookOrQuery.title}" již byla v seznamu. Počet kusů navýšen na ${count} ks!`);
+      } else {
+        setSuccessMsg(`Kniha "${bookOrQuery.title}" byla úspěšně uložena do seznamu!`);
+      }
+
+      setSelectedBook(result.book);
+    } catch (err) {
+      console.error('Chyba při ukládání vybrané knihy:', err);
+      setErrorMsg('Při ukládání knihy došlo k chybě.');
     }
   };
 
@@ -188,28 +206,20 @@ export default function App() {
             </div>
           )}
 
-          {/* Manual ISBN / Search Input */}
+          {/* Manual ISBN / Search Input with Live Autocomplete & Editions */}
           <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm space-y-3">
-            <h3 className="font-semibold text-slate-800 text-sm flex items-center gap-2">
-              <Search className="w-4 h-4 text-emerald-600" /> Ruční zadání knižního kódu nebo názvu
-            </h3>
-            <form onSubmit={handleManualSearchSubmit} className="flex gap-2">
-              <input
-                type="text"
-                placeholder="Vložte ISBN (např. 9788020455826) nebo název knihy..."
-                value={manualQuery}
-                onChange={(e) => setManualQuery(e.target.value)}
-                className="flex-1 px-3.5 py-2.5 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 bg-slate-50 focus:bg-white"
-              />
-              <button
-                type="submit"
-                disabled={isLoading || !manualQuery.trim()}
-                className="bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-medium px-4 py-2.5 rounded-lg text-sm transition flex items-center gap-2"
-              >
-                {isLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
-                <span>Vyhledat</span>
-              </button>
-            </form>
+            <div className="flex items-center justify-between">
+              <h3 className="font-semibold text-slate-800 text-sm flex items-center gap-2">
+                <Search className="w-4 h-4 text-emerald-600" /> Vyhledávání podle názvu nebo ISBN
+              </h3>
+              <span className="text-xs text-slate-400 hidden sm:inline">
+                Našeptávač titulů a různých vydání
+              </span>
+            </div>
+            <BookSearchInput
+              onSelectBook={handleSelectBookDirectly}
+              isLoadingGlobal={isLoading}
+            />
           </div>
 
           {/* Quick Preview of Recent Scans */}
