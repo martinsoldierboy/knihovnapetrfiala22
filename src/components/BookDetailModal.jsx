@@ -1,5 +1,5 @@
 import React from 'react';
-import { X, BookOpen, Calendar, Building, Hash, Tag, Globe, Bookmark, Copy, Plus, Minus } from 'lucide-react';
+import { X, BookOpen, Calendar, Building, Hash, Tag, Globe, Bookmark, Copy, Plus, Minus, ExternalLink } from 'lucide-react';
 import { getMdtCategory } from '../services/mdtClassification';
 import { changeBookCount } from '../services/storage';
 
@@ -141,6 +141,22 @@ export default function BookDetailModal({ book, onClose, onDelete, onRefresh }) 
                   <div className="flex items-center gap-2 justify-center sm:justify-start text-xs text-slate-500 pt-1">
                     <Globe className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
                     <span>Zdroj dat: {book.source}</span>
+                  </div>
+                )}
+                {(book.obalkyKnihUrl || (book.coverImage && book.coverImage.includes('obalkyknih.cz'))) && (
+                  <div className="flex items-center gap-2 justify-center sm:justify-start text-xs text-slate-500 pt-0.5">
+                    <ExternalLink className="w-3.5 h-3.5 text-emerald-600 flex-shrink-0" />
+                    <span>
+                      Obálka:{' '}
+                      <a
+                        href={book.obalkyKnihUrl || `https://www.obalkyknih.cz/view?isbn=${book.isbn}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-emerald-700 hover:text-emerald-800 underline font-medium"
+                      >
+                        ObálkyKnih.cz
+                      </a>
+                    </span>
                   </div>
                 )}
               </div>

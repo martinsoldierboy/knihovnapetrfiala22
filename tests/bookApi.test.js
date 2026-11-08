@@ -15,7 +15,10 @@ import {
   searchGoogleBooksList,
   searchBooks,
   fetchFromKnihovnyCz,
-  fetchCoverImageFallback
+  fetchCoverImageFallback,
+  fetchCoverFromObalkyKnih,
+  normalizeObalkyCoverUrl,
+  searchBook
 } from '../src/services/bookApi.js';
 import { getMdtCategory, getMdtColorConfig, MDT_CLASSES } from '../src/services/mdtClassification.js';
 
@@ -75,24 +78,148 @@ test('MDT category classification and genre color assignment', () => {
   assert.equal(color5.hex, '#10b981');
 });
 
-test('Cover image fallback generation', async () => {
+test('normalizeObalkyCoverUrl converts cache URLs to www.obalkyknih.cz', () => {
+  assert.equal(
+    normalizeObalkyCoverUrl('http://cache.obalkyknih.cz/file/cover/487884/preview510'),
+    'https://www.obalkyknih.cz/file/cover/487884/preview510'
+  );
+  assert.equal(
+    normalizeObalkyCoverUrl('https://cache2.obalkyknih.cz/file/cover/123/medium'),
+    'https://www.obalkyknih.cz/file/cover/123/medium'
+  );
+  assert.equal(
+    normalizeObalkyCoverUrl('https://www.obalkyknih.cz/file/cover/487884/medium'),
+    'https://www.obalkyknih.cz/file/cover/487884/medium'
+  );
+  assert.equal(normalizeObalkyCoverUrl(null), null);
+});
+
+test('fetchCoverFromObalkyKnih queries ObálkyKnih API and returns normalized cover', async () => {
+  const mockObalkyResponse = [
+    {
+      _id: '6af076ca3541f9a854103ad8',
+      ean: '9788025703670',
+      cover_preview510_url: 'https://cache.obalkyknih.cz/file/cover/487884/preview510',
+      cover_medium_url: 'https://cache.obalkyknih.cz/file/cover/487884/medium',
+      backlink_url: 'http://www.obalkyknih.cz/view?isbn=9788025703670',
+      annotation: { html: '<p>Skvělá kniha o poezii</p>' },
+      rating_avg100: '85'
+    }
+  ];
+
   const globalFetchBackup = globalThis.fetch;
   globalThis.fetch = async (url) => {
-    if (url.includes('covers.openlibrary.org')) {
+    assert.match(url, /https:\/\/cache\.obalkyknih\.cz\/api\/books\?/);
+    assert.match(url, /isbn=9788025703670/);
+    return {
+      ok: true,
+      json: async () => mockObalkyResponse
+    };
+  };
+
+  try {
+    const result = await fetchCoverFromObalkyKnih('978-80-257-0367-0');
+    assert.notEqual(result, null);
+    assert.equal(result.coverUrl, 'https://www.obalkyknih.cz/file/cover/487884/preview510');
+    assert.equal(result.backlinkUrl, 'https://www.obalkyknih.cz/view?isbn=9788025703670');
+    assert.equal(result.annotation, 'Skvělá kniha o poezii');
+    assert.equal(result.rating, 85);
+  } finally {
+    globalThis.fetch = globalFetchBackup;
+  }
+});
+
+test('fetchCoverFromObalkyKnih returns null on bare record without covers', async () => {
+  const mockBareResponse = [
+    {
+      _id: 'bare123',
+      flag_bare_record: 1,
+      ean: '9999999999999'
+    }
+  ];
+
+  const globalFetchBackup = globalThis.fetch;
+  globalThis.fetch = async () => ({
+    ok: true,
+    json: async () => mockBareResponse
+  });
+
+  try {
+    const result = await fetchCoverFromObalkyKnih('9999999999999');
+    assert.equal(result, null);
+  } finally {
+    globalThis.fetch = globalFetchBackup;
+  }
+});
+
+test('Cover image fallback generation prioritizes ObálkyKnih.cz', async () => {
+  const globalFetchBackup = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    if (url.includes('obalkyknih.cz/api/books')) {
       return {
         ok: true,
-        headers: new Map([
-          ['content-type', 'image/jpeg'],
-          ['content-length', '25000']
-        ])
+        json: async () => [
+          {
+            cover_medium_url: 'https://cache.obalkyknih.cz/file/cover/2238685/medium',
+            backlink_url: 'https://www.obalkyknih.cz/view?isbn=9788020455826'
+          }
+        ]
       };
     }
     return { ok: false };
   };
 
   try {
-    const coverUrl = await fetchCoverImageFallback('9788025703670', 'Životy slavných');
-    assert.equal(coverUrl, 'https://covers.openlibrary.org/b/isbn/9788025703670-L.jpg');
+    const coverUrl = await fetchCoverImageFallback('9788020455826', 'Nezlomná');
+    assert.equal(coverUrl, 'https://www.obalkyknih.cz/file/cover/2238685/medium');
+  } finally {
+    globalThis.fetch = globalFetchBackup;
+  }
+});
+
+test('searchBook enriches Knihovny.cz record with ObálkyKnih cover', async () => {
+  const sampleKnihovnyResp = {
+    resultCount: 1,
+    records: [{
+      id: 'knihovny-123',
+      title: 'Babička',
+      authors: { primary: { 'Božena Němcová': [] } },
+      isbns: ['9788025703670'],
+      publishers: ['Odeon']
+    }],
+    status: 'OK'
+  };
+
+  const sampleObalkyResp = [
+    {
+      cover_preview510_url: 'https://cache.obalkyknih.cz/file/cover/487884/preview510',
+      backlink_url: 'https://www.obalkyknih.cz/view?isbn=9788025703670'
+    }
+  ];
+
+  const globalFetchBackup = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    if (url.includes('knihovny.cz/api/v1/search')) {
+      return {
+        ok: true,
+        json: async () => sampleKnihovnyResp
+      };
+    }
+    if (url.includes('obalkyknih.cz/api/books')) {
+      return {
+        ok: true,
+        json: async () => sampleObalkyResp
+      };
+    }
+    return { ok: false };
+  };
+
+  try {
+    const book = await searchBook('9788025703670');
+    assert.notEqual(book, null);
+    assert.equal(book.title, 'Babička');
+    assert.equal(book.coverImage, 'https://www.obalkyknih.cz/file/cover/487884/preview510');
+    assert.equal(book.obalkyKnihUrl, 'https://www.obalkyknih.cz/view?isbn=9788025703670');
   } finally {
     globalThis.fetch = globalFetchBackup;
   }

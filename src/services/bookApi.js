@@ -504,13 +504,96 @@ export async function fetchFromOpenLibrary(query) {
 }
 
 /**
+ * Normalizes cache.obalkyknih.cz file URLs to www.obalkyknih.cz for public asset delivery
+ */
+export function normalizeObalkyCoverUrl(url) {
+  if (!url || typeof url !== 'string') return null;
+  // Replace cache*.obalkyknih.cz/file/ with www.obalkyknih.cz/file/
+  return url
+    .replace(/^http:\/\//i, 'https://')
+    .replace(/^https:\/\/cache\d*\.obalkyknih\.cz\/file\//i, 'https://www.obalkyknih.cz/file/');
+}
+
+/**
+ * Looks up cover image and details from ObalkyKnih.cz API
+ */
+export async function fetchCoverFromObalkyKnih(isbn, cnb) {
+  const cleanIsbn = isbn ? normalizeToIsbn13(isbn) : '';
+  const cleanCnb = cnb ? String(cnb).trim() : '';
+
+  if (!cleanIsbn && !cleanCnb) return null;
+
+  const identifiers = [];
+  if (cleanIsbn) identifiers.push(`isbn=${encodeURIComponent(cleanIsbn)}`);
+  if (cleanCnb) identifiers.push(`nbn=${encodeURIComponent(cleanCnb)}`);
+
+  // Query ObalkyKnih metadata API
+  const queryUrl = `https://cache.obalkyknih.cz/api/books?${identifiers.join('&')}`;
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 6000);
+
+  try {
+    const response = await fetch(queryUrl, {
+      signal: controller.signal
+    });
+    clearTimeout(timeoutId);
+
+    if (!response.ok) return null;
+
+    const data = await response.json();
+    if (!Array.isArray(data) || data.length === 0) return null;
+
+    const record = data[0];
+    if (record.flag_bare_record && !record.cover_medium_url && !record.cover_preview510_url && !record.cover_thumbnail_url) {
+      return null;
+    }
+
+    // Select the best available cover resolution: preview510 > medium > thumbnail > icon
+    const rawCover = record.cover_preview510_url ||
+      record.cover_medium_url ||
+      record.cover_thumbnail_url ||
+      record.cover_icon_url;
+
+    if (!rawCover) return null;
+
+    const coverUrl = normalizeObalkyCoverUrl(rawCover);
+    const backlinkUrl = record.backlink_url
+      ? record.backlink_url.replace(/^http:\/\//i, 'https://')
+      : (cleanIsbn ? `https://www.obalkyknih.cz/view?isbn=${cleanIsbn}` : null);
+
+    return {
+      coverUrl,
+      backlinkUrl,
+      annotation: record.annotation?.html ? record.annotation.html.replace(/<[^>]*>?/gm, '').trim() : '',
+      rating: record.rating_avg100 ? parseInt(record.rating_avg100, 10) : null
+    };
+  } catch (err) {
+    clearTimeout(timeoutId);
+    return null;
+  }
+}
+
+/**
  * Helper to retrieve book cover image fallback when missing from primary source
  */
-export async function fetchCoverImageFallback(isbn, title) {
+export async function fetchCoverImageFallback(isbn, title, cnb) {
   const cleanIsbn = normalizeToIsbn13(isbn);
 
+  // 1. Prioritize ObalkyKnih.cz for Czech and Slovak books whenever ISBN or ČNB is available
+  if ((cleanIsbn && /^\d{13}$/.test(cleanIsbn)) || cnb) {
+    try {
+      const obalkyResult = await fetchCoverFromObalkyKnih(cleanIsbn, cnb);
+      if (obalkyResult?.coverUrl) {
+        return obalkyResult.coverUrl;
+      }
+    } catch (e) {
+      // Continue to next fallbacks on error
+    }
+  }
+
   if (cleanIsbn && /^\d{13}$/.test(cleanIsbn)) {
-    // Try Open Library direct cover URL
+    // 2. Try Open Library direct cover URL
     const olCoverUrl = `https://covers.openlibrary.org/b/isbn/${cleanIsbn}-L.jpg`;
     try {
       const resp = await fetch(olCoverUrl, { method: 'HEAD' });
@@ -525,13 +608,13 @@ export async function fetchCoverImageFallback(isbn, title) {
       // Ignore network HEAD failure
     }
 
-    // Try Google Books API lookup for thumbnail image
+    // 3. Try Google Books API lookup for thumbnail image
     const gbResult = await fetchFromGoogleBooks(cleanIsbn);
     if (gbResult?.coverImage) {
       return gbResult.coverImage;
     }
 
-    // ObalkyKnih.cz direct image link fallback for Czech books
+    // 4. ObalkyKnih.cz direct image link fallback for Czech books
     return `https://www.obalkyknih.cz/view?isbn=${cleanIsbn}`;
   }
 
@@ -634,11 +717,28 @@ export async function searchBook(query) {
 
   if (!bookResult) return null;
 
-  // Ensure coverImage is populated if missing
+  // Attempt to fetch cover from ObalkyKnih.cz if not yet set or to enrich Czech book covers
+  if (bookResult.isbn || bookResult.cnb) {
+    const obalkyData = await fetchCoverFromObalkyKnih(bookResult.isbn, bookResult.cnb);
+    if (obalkyData?.coverUrl) {
+      bookResult.coverImage = obalkyData.coverUrl;
+      bookResult.obalkyKnihUrl = obalkyData.backlinkUrl;
+    }
+  }
+
+  // Ensure coverImage is populated if still missing
   if (!bookResult.coverImage && (bookResult.isbn || bookResult.title)) {
-    const fallbackCover = await fetchCoverImageFallback(bookResult.isbn, bookResult.title);
+    const fallbackCover = await fetchCoverImageFallback(bookResult.isbn, bookResult.title, bookResult.cnb);
     if (fallbackCover) {
       bookResult.coverImage = fallbackCover;
+    }
+  }
+
+  // Provide default obalkyKnihUrl if book has ISBN
+  if (!bookResult.obalkyKnihUrl && bookResult.isbn) {
+    const cleanIsbn = normalizeToIsbn13(bookResult.isbn);
+    if (cleanIsbn) {
+      bookResult.obalkyKnihUrl = `https://www.obalkyknih.cz/view?isbn=${cleanIsbn}`;
     }
   }
 
