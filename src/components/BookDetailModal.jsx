@@ -1,19 +1,27 @@
 import React from 'react';
-import { X, BookOpen, Calendar, Building, Hash, Tag, Globe, Bookmark, Copy, Plus, Minus, ExternalLink, Star, FileText, Layers } from 'lucide-react';
+import { X, BookOpen, Calendar, Building, Hash, Tag, Globe, Bookmark, Copy, Plus, Minus, ExternalLink, Star, FileText, Layers, User } from 'lucide-react';
 import { getMdtCategory } from '../services/mdtClassification';
+import { extractIndividualAuthors } from '../services/bookApi';
 import { changeBookCount } from '../services/storage';
 import { getDatabazeKnihUrl } from '../services/bookApi';
 
-export default function BookDetailModal({ book, onClose, onDelete, onRefresh }) {
+export default function BookDetailModal({ book, onClose, onDelete, onRefresh, onFilterByAuthor }) {
   if (!book) return null;
 
   const mdtCategory = getMdtCategory(book);
   const bookCount = book.count || 1;
   const databazeKnihUrl = book.databazeKnihUrl || getDatabazeKnihUrl(book);
+  const individualAuthors = extractIndividualAuthors(book.authors);
 
   const handleAdjustCount = (delta) => {
     changeBookCount(book.id, delta);
     if (onRefresh) onRefresh();
+  };
+
+  const handleAuthorClick = (authorName) => {
+    if (onFilterByAuthor) {
+      onFilterByAuthor(authorName);
+    }
   };
 
   return (
@@ -88,7 +96,24 @@ export default function BookDetailModal({ book, onClose, onDelete, onRefresh }) 
               </div>
 
               <h3 className="text-xl font-bold text-slate-900 leading-tight">{book.title}</h3>
-              <p className="text-base text-emerald-700 font-semibold">{book.authors || 'Neznámý autor'}</p>
+
+              {/* Clickable Author or Authors */}
+              <div className="flex flex-wrap items-center gap-1.5 text-sm text-emerald-700 font-semibold">
+                <User className="w-4 h-4 text-emerald-600 flex-shrink-0" />
+                {individualAuthors.map((author, idx) => (
+                  <span key={author} className="inline-flex items-center">
+                    <button
+                      type="button"
+                      onClick={() => handleAuthorClick(author)}
+                      className="hover:underline hover:text-emerald-900 text-left font-bold"
+                      title={`Zobrazit všechny knihy autora: ${author}`}
+                    >
+                      {author}
+                    </button>
+                    {idx < individualAuthors.length - 1 && <span className="mr-1">,</span>}
+                  </span>
+                ))}
+              </div>
 
               {/* Duplicate / Count Bar */}
               <div className="p-2.5 bg-slate-50 border border-slate-200 rounded-lg flex items-center justify-between gap-3">
