@@ -244,21 +244,7 @@ export async function fetchFromKnihovnyCz(query) {
       if (isbnMatch) displayIsbn = isbnMatch[0];
     }
 
-    return {
-      id: selectedRecord.id || `knihovny-${Date.now()}`,
-      title,
-      authors,
-      isbn: displayIsbn,
-      publishedDate,
-      publisher: place ? `${publisher} (${place})`.replace(/^\s*\((.*?)\)$/, '$1') : publisher,
-      description: physDesc ? `Fyzický popis: ${physDesc}` : 'Popis není k dispozici.',
-      coverImage: null,
-      pageCount,
-      categories: selectedRecord.formats?.join(', ') || '',
-      language: '',
-      cnb: selectedRecord.cnb || '',
-      source: 'Knihovny.cz'
-    };
+    return formatKnihovnyRecord(selectedRecord, displayIsbn);
   } catch (error) {
     clearTimeout(timeoutId);
     console.error('Chyba při načítání z Knihovny.cz API:', error);
@@ -267,63 +253,187 @@ export async function fetchFromKnihovnyCz(query) {
 }
 
 /**
- * Search Google Books API
+ * Format a raw Knihovny.cz record into a normalized Book object
  */
-export async function fetchFromGoogleBooks(query) {
+export function formatKnihovnyRecord(rec, fallbackIsbn = '') {
+  if (!rec) return null;
+
+  const rawTitle = rec.title || 'Neznámý název';
+  const title = cleanCatalogPunctuation(rawTitle);
+  const authors = parseKnihovnyAuthors(rec.authors);
+
+  const rawPublisher = rec.publishers?.[0] || '';
+  const publisher = cleanCatalogPunctuation(rawPublisher);
+
+  const rawPlace = rec.placesOfPublication?.[0] || '';
+  const place = cleanCatalogPunctuation(rawPlace);
+
+  let publishedDate = '';
+  if (rec.publicationDates?.[0]) {
+    const yearMatch = rec.publicationDates[0].match(/\d{4}/);
+    if (yearMatch) {
+      publishedDate = yearMatch[0];
+    }
+  }
+
+  let pageCount = 0;
+  const physDesc = rec.physicalDescriptions?.[0] || '';
+  if (physDesc) {
+    const pageMatch = physDesc.match(/(\d+)\s*(?:s\.|stran|str|p\.)/i);
+    if (pageMatch) {
+      pageCount = parseInt(pageMatch[1], 10);
+    }
+  }
+
+  // Find representative ISBN
+  let displayIsbn = fallbackIsbn;
+  if (rec.isbns?.[0]) {
+    const isbnMatch = rec.isbns[0].match(/[\d-X]+/i);
+    if (isbnMatch) displayIsbn = isbnMatch[0];
+  }
+
+  const cleanIsbn13 = normalizeToIsbn13(displayIsbn);
+  const coverImage = cleanIsbn13 && /^\d{13}$/.test(cleanIsbn13)
+    ? `https://www.obalkyknih.cz/view?isbn=${cleanIsbn13}`
+    : null;
+
+  return {
+    id: rec.id || `knihovny-${Date.now()}-${Math.random()}`,
+    title,
+    authors,
+    isbn: displayIsbn,
+    publishedDate,
+    publisher: place ? `${publisher} (${place})`.replace(/^\s*\((.*?)\)$/, '$1') : publisher,
+    description: physDesc ? `Fyzický popis: ${physDesc}` : 'Popis není k dispozici.',
+    coverImage,
+    pageCount,
+    categories: rec.formats?.join(', ') || '',
+    language: '',
+    cnb: rec.cnb || '',
+    source: 'Knihovny.cz'
+  };
+}
+
+/**
+ * Fetch multiple records from Knihovny.cz
+ */
+export async function searchKnihovnyCzList(query, limit = 10) {
+  if (!query || !query.trim()) return [];
+
+  const isIsbn = isIsbnLike(query);
+  const targetIsbn13 = isIsbn ? normalizeToIsbn13(query) : null;
+  const searchLookfor = targetIsbn13 || normalizeIsbn(query) || query.trim();
+  const searchType = isIsbn ? 'ISN' : 'AllFields';
+
+  const params = new URLSearchParams({
+    lookfor: searchLookfor,
+    type: searchType,
+    limit: String(limit)
+  });
+  for (const field of KNIHOVNY_FIELDS) {
+    params.append('field[]', field);
+  }
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 8000);
+
+  try {
+    const response = await fetch(`https://www.knihovny.cz/api/v1/search?${params.toString()}`, {
+      signal: controller.signal
+    });
+    clearTimeout(timeoutId);
+
+    if (!response.ok) return [];
+
+    const data = await response.json();
+    const records = data.records ?? [];
+    if (!Array.isArray(records) || records.length === 0) return [];
+
+    return records.map(rec => formatKnihovnyRecord(rec, targetIsbn13 || ''));
+  } catch (error) {
+    clearTimeout(timeoutId);
+    console.error('Chyba při prohledávání Knihovny.cz API:', error);
+    return [];
+  }
+}
+
+/**
+ * Helper to format Google Books volume into standardized book item
+ */
+export function formatGoogleBooksItem(item, fallbackQuery = '') {
+  if (!item || !item.volumeInfo) return null;
+  const book = item.volumeInfo;
+  const industryIdentifiers = book.industryIdentifiers || [];
+
+  let isbn = '';
+  const isbn13Obj = industryIdentifiers.find(id => id.type === 'ISBN_13');
+  const isbn10Obj = industryIdentifiers.find(id => id.type === 'ISBN_10');
+  if (isbn13Obj) isbn = isbn13Obj.identifier;
+  else if (isbn10Obj) isbn = isbn10Obj.identifier;
+  else if (industryIdentifiers[0]) isbn = industryIdentifiers[0].identifier;
+  else if (isIsbnLike(fallbackQuery)) isbn = normalizeToIsbn13(fallbackQuery);
+
+  const coverImage = book.imageLinks?.thumbnail
+    ? book.imageLinks.thumbnail.replace('http://', 'https://')
+    : null;
+
+  return {
+    id: item.id || `gb-${Date.now()}-${Math.random()}`,
+    title: book.title || 'Neznámý název',
+    authors: book.authors ? book.authors.join(', ') : 'Neznámý autor',
+    isbn: isbn || fallbackQuery,
+    publishedDate: book.publishedDate || '',
+    publisher: book.publisher || '',
+    description: book.description || 'Popis není k dispozici.',
+    coverImage: coverImage,
+    pageCount: book.pageCount || 0,
+    categories: book.categories ? book.categories.join(', ') : '',
+    language: book.language || '',
+    source: 'Google Books'
+  };
+}
+
+/**
+ * Search Google Books API for multiple records
+ */
+export async function searchGoogleBooksList(query, limit = 10) {
+  if (!query || !query.trim()) return [];
+
   const clean = normalizeIsbn(query);
   const isIsbn = isIsbnLike(clean);
   const targetIsbn = isIsbn ? normalizeToIsbn13(clean) : clean;
 
   const searchParam = isIsbn ? `isbn:${targetIsbn}` : encodeURIComponent(query);
-  const url = `https://www.googleapis.com/books/v1/volumes?q=${searchParam}`;
+  const url = `https://www.googleapis.com/books/v1/volumes?q=${searchParam}&maxResults=${Math.min(limit, 40)}`;
 
   try {
     let response = await fetch(url);
-    if (!response.ok) return null;
+    if (!response.ok) return [];
     let data = await response.json();
 
     if ((!data.items || data.items.length === 0) && isIsbn) {
-      const fallbackUrl = `https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(targetIsbn)}`;
+      const fallbackUrl = `https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(targetIsbn)}&maxResults=${Math.min(limit, 40)}`;
       const fallbackResp = await fetch(fallbackUrl);
       if (fallbackResp.ok) {
         data = await fallbackResp.json();
       }
     }
 
-    if (!data.items || data.items.length === 0) return null;
+    if (!data.items || !Array.isArray(data.items)) return [];
 
-    const book = data.items[0].volumeInfo;
-    const industryIdentifiers = book.industryIdentifiers || [];
-
-    let isbn = targetIsbn;
-    const isbn13Obj = industryIdentifiers.find(id => id.type === 'ISBN_13');
-    const isbn10Obj = industryIdentifiers.find(id => id.type === 'ISBN_10');
-    if (isbn13Obj) isbn = isbn13Obj.identifier;
-    else if (isbn10Obj) isbn = isbn10Obj.identifier;
-
-    // Cover image high res if available
-    const coverImage = book.imageLinks?.thumbnail
-      ? book.imageLinks.thumbnail.replace('http://', 'https://')
-      : null;
-
-    return {
-      id: data.items[0].id || `gb-${Date.now()}`,
-      title: book.title || 'Neznámý název',
-      authors: book.authors ? book.authors.join(', ') : 'Neznámý autor',
-      isbn: isbn || query,
-      publishedDate: book.publishedDate || '',
-      publisher: book.publisher || '',
-      description: book.description || 'Popis není k dispozici.',
-      coverImage: coverImage,
-      pageCount: book.pageCount || 0,
-      categories: book.categories ? book.categories.join(', ') : '',
-      language: book.language || '',
-      source: 'Google Books'
-    };
+    return data.items.map(item => formatGoogleBooksItem(item, query)).filter(Boolean);
   } catch (error) {
-    console.error('Chyba při načítání z Google Books API:', error);
-    return null;
+    console.error('Chyba při vyhledávání v Google Books API:', error);
+    return [];
   }
+}
+
+/**
+ * Search Google Books API (single record)
+ */
+export async function fetchFromGoogleBooks(query) {
+  const items = await searchGoogleBooksList(query, 1);
+  return items.length > 0 ? items[0] : null;
 }
 
 /**
@@ -433,6 +543,72 @@ export async function fetchCoverImageFallback(isbn, title) {
   }
 
   return null;
+}
+
+/**
+ * Searches books from Knihovny.cz with fallback to Google Books and Open Library,
+ * returning a list of distinct records / editions.
+ */
+export async function searchBooks(query, { limit = 12 } = {}) {
+  if (!query || !query.trim()) return [];
+
+  const trimmedQuery = query.trim();
+  const results = [];
+  const seenIsbns = new Set();
+  const seenFingerprints = new Set();
+
+  const addUnique = (book) => {
+    if (!book || !book.title) return;
+    const cleanIsbn = normalizeToIsbn13(book.isbn);
+
+    // Fingerprint by title + author + publishedDate + publisher
+    const normTitle = (book.title || '').toLowerCase().replace(/[^a-z0-9]/gi, '');
+    const normPub = (book.publisher || '').toLowerCase().replace(/[^a-z0-9]/gi, '');
+    const normYear = book.publishedDate || '';
+    const fingerprint = `${normTitle}|${normPub}|${normYear}`;
+
+    if (cleanIsbn && /^\d{13}$/.test(cleanIsbn)) {
+      if (seenIsbns.has(cleanIsbn)) return;
+      seenIsbns.add(cleanIsbn);
+    } else {
+      if (seenFingerprints.has(fingerprint)) return;
+    }
+
+    seenFingerprints.add(fingerprint);
+
+    // Add fallback cover if needed
+    if (!book.coverImage && cleanIsbn && /^\d{13}$/.test(cleanIsbn)) {
+      book.coverImage = `https://www.obalkyknih.cz/view?isbn=${cleanIsbn}`;
+    }
+
+    results.push(book);
+  };
+
+  // 1. Fetch from Knihovny.cz
+  const knihovnyResults = await searchKnihovnyCzList(trimmedQuery, limit);
+  for (const book of knihovnyResults) {
+    addUnique(book);
+    if (results.length >= limit) break;
+  }
+
+  // 2. If results are few or empty, supplement from Google Books
+  if (results.length < limit) {
+    const gbResults = await searchGoogleBooksList(trimmedQuery, limit - results.length);
+    for (const book of gbResults) {
+      addUnique(book);
+      if (results.length >= limit) break;
+    }
+  }
+
+  // 3. If still empty and query is not ISBN, try Open Library single query fallback
+  if (results.length === 0) {
+    const olResult = await fetchFromOpenLibrary(trimmedQuery);
+    if (olResult) {
+      addUnique(olResult);
+    }
+  }
+
+  return results;
 }
 
 /**
