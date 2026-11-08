@@ -111,7 +111,83 @@ export function cleanAuthorName(name) {
   if (!name) return '';
   return name
     .replace(/,?\s*(?:asi|cca|nar\.|b\.|d\.)?\s*\d{3,4}(?:\s*[-–—]\s*\d{0,4})?\s*$/i, '')
+    .replace(/^[\s,;]+|[\s,;]+$/g, '')
     .trim();
+}
+
+/**
+ * Extracts individual cleaned author names from an author string
+ * (e.g. "Karel Čapek, Josef Čapek" -> ["Karel Čapek", "Josef Čapek"])
+ */
+export function extractIndividualAuthors(authorsStr) {
+  if (authorsStr == null) return [];
+  if (typeof authorsStr !== 'string') return [];
+
+  const raw = authorsStr.trim();
+  if (!raw || raw.toLowerCase() === 'neznámý autor') return ['Neznámý autor'];
+
+  // Split by comma, semicolon, or slash if they separate different authors
+  // E.g. "Čapek, Karel; Čapek, Josef" or "Karel Čapek, Josef Čapek"
+  let parts;
+  if (raw.includes(';')) {
+    parts = raw.split(';');
+  } else if (raw.includes(' / ')) {
+    parts = raw.split(' / ');
+  } else {
+    // If comma-separated, check if it's "Lastname, Firstname" or multiple "Firstname Lastname, Firstname Lastname"
+    // If only one comma and looks like "Lastname, Firstname" (no other commas), keep as single author
+    const commaParts = raw.split(',').map(s => s.trim()).filter(Boolean);
+    if (commaParts.length === 2 && !commaParts[0].includes(' ') && commaParts[1].split(' ').length <= 2) {
+      // "Čapek, Karel" -> single author "Karel Čapek" or formatted
+      parts = [raw];
+    } else {
+      parts = commaParts;
+    }
+  }
+
+  const result = parts
+    .map(p => cleanAuthorName(p))
+    .filter(p => p.length > 0 && p !== '-' && p.toLowerCase() !== 'neznámý autor');
+
+  return result.length > 0 ? Array.from(new Set(result)) : ['Neznámý autor'];
+}
+
+/**
+ * Aggregates author statistics across saved books
+ * Returns an array of author objects: { name, bookCount, totalCopies, bookIds }
+ */
+export function getAuthorStatistics(books) {
+  if (!Array.isArray(books) || books.length === 0) return [];
+
+  const map = new Map();
+
+  for (const book of books) {
+    const authors = extractIndividualAuthors(book.authors);
+    const count = typeof book.count === 'number' && book.count > 0 ? book.count : 1;
+
+    for (const author of authors) {
+      if (!map.has(author)) {
+        map.set(author, {
+          name: author,
+          bookCount: 0,
+          totalCopies: 0,
+          books: []
+        });
+      }
+      const item = map.get(author);
+      item.bookCount += 1;
+      item.totalCopies += count;
+      item.books.push(book);
+    }
+  }
+
+  // Sort primarily by bookCount descending, then alphabetically by name
+  return Array.from(map.values()).sort((a, b) => {
+    if (b.bookCount !== a.bookCount) {
+      return b.bookCount - a.bookCount;
+    }
+    return a.name.localeCompare(b.name, 'cs');
+  });
 }
 
 /**

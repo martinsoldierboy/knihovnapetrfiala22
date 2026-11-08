@@ -14,6 +14,7 @@ export default function App() {
   const [successMsg, setSuccessMsg] = useState('');
   const [scannedBooks, setScannedBooks] = useState([]);
   const [selectedBook, setSelectedBook] = useState(null);
+  const [authorFilter, setAuthorFilter] = useState('ALL');
   const lastScanTimeRef = useRef(0);
   const lastProcessedCodeRef = useRef('');
 
@@ -117,6 +118,12 @@ export default function App() {
     if (selectedBook && selectedBook.id === id) {
       setSelectedBook(null);
     }
+  };
+
+  const handleFilterByAuthorFromModal = (authorName) => {
+    setSelectedBook(null);
+    setAuthorFilter(authorName);
+    setCurrentView('list');
   };
 
   return (
@@ -284,6 +291,8 @@ export default function App() {
             onDeleteBook={handleDeleteBook}
             onGoBack={() => setCurrentView('scanner')}
             onRefresh={refreshBooks}
+            initialAuthorFilter={authorFilter}
+            onClearAuthorFilter={() => setAuthorFilter('ALL')}
           />
         )}
       </main>
@@ -298,6 +307,7 @@ export default function App() {
             setSelectedBook(null);
           }}
           onRefresh={refreshBooks}
+          onFilterByAuthor={handleFilterByAuthorFromModal}
         />
       )}
 

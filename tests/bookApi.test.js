@@ -8,6 +8,8 @@ import {
   extractIsbnFromText,
   cleanCatalogPunctuation,
   cleanAuthorName,
+  extractIndividualAuthors,
+  getAuthorStatistics,
   parseKnihovnyAuthors,
   formatKnihovnyRecord,
   formatGoogleBooksItem,
@@ -356,6 +358,38 @@ test('Clean author name and parse Knihovny authors', () => {
   };
 
   assert.equal(parseKnihovnyAuthors(mockAuthors), 'Jean de Nostredame');
+});
+
+test('extractIndividualAuthors handles single and multiple authors', () => {
+  assert.deepEqual(extractIndividualAuthors('Karel Čapek'), ['Karel Čapek']);
+  assert.deepEqual(extractIndividualAuthors('Karel Čapek, Josef Čapek'), ['Karel Čapek', 'Josef Čapek']);
+  assert.deepEqual(extractIndividualAuthors('Božena Němcová; Karel Jaromír Erben'), ['Božena Němcová', 'Karel Jaromír Erben']);
+  assert.deepEqual(extractIndividualAuthors('Jean de Nostredame, asi 1507-1577'), ['Jean de Nostredame']);
+  assert.deepEqual(extractIndividualAuthors('Neznámý autor'), ['Neznámý autor']);
+  assert.deepEqual(extractIndividualAuthors(''), ['Neznámý autor']);
+  assert.deepEqual(extractIndividualAuthors(null), []);
+});
+
+test('getAuthorStatistics computes counts and copies correctly', () => {
+  const books = [
+    { id: '1', title: 'Válka s Mloky', authors: 'Karel Čapek', count: 2 },
+    { id: '2', title: 'R.U.R.', authors: 'Karel Čapek', count: 1 },
+    { id: '3', title: 'Povídání o pejskovi a kočičce', authors: 'Josef Čapek', count: 3 },
+    { id: '4', title: 'Ze života hmyzu', authors: 'Karel Čapek, Josef Čapek', count: 1 }
+  ];
+
+  const stats = getAuthorStatistics(books);
+  assert.equal(stats.length, 2);
+
+  // Karel Čapek: 3 books (Válka s Mloky, R.U.R., Ze života hmyzu), total copies = 2 + 1 + 1 = 4
+  assert.equal(stats[0].name, 'Karel Čapek');
+  assert.equal(stats[0].bookCount, 3);
+  assert.equal(stats[0].totalCopies, 4);
+
+  // Josef Čapek: 2 books (Povídání, Ze života hmyzu), total copies = 3 + 1 = 4
+  assert.equal(stats[1].name, 'Josef Čapek');
+  assert.equal(stats[1].bookCount, 2);
+  assert.equal(stats[1].totalCopies, 4);
 });
 
 test('Knihovny.cz sample response parsing with raw numeric ISBN', async () => {
