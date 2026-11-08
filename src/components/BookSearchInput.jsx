@@ -119,7 +119,7 @@ export default function BookSearchInput({ onSelectBook, isLoadingGlobal }) {
         <input
           ref={inputRef}
           type="text"
-          placeholder="Napište název knihy nebo zadejte ISBN..."
+          placeholder="Napište název knihy, jméno autora nebo zadejte ISBN..."
           value={inputValue}
           onChange={(e) => setInputValue(e.target.value)}
           onFocus={() => {
@@ -241,9 +241,9 @@ export default function BookSearchInput({ onSelectBook, isLoadingGlobal }) {
             </div>
           ) : inputValue.trim().length >= 2 ? (
             <div className="p-6 text-center text-slate-500 text-sm">
-              <p className="font-medium text-slate-700">Kniha nebyla nalezena</p>
+              <p className="font-medium text-slate-700">Kniha ani autor nebyli nalezeni</p>
               <p className="text-xs text-slate-400 mt-1">
-                Zkuste upřesnit název nebo zkontrolovat překlepy.
+                Zkuste upřesnit název, jméno autora nebo zkontrolovat překlepy.
               </p>
             </div>
           ) : null}

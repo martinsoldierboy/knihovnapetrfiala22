@@ -18,6 +18,7 @@ import {
   fetchCoverImageFallback,
   fetchCoverFromObalkyKnih,
   normalizeObalkyCoverUrl,
+  getDatabazeKnihUrl,
   searchBook
 } from '../src/services/bookApi.js';
 import { getMdtCategory, getMdtColorConfig, MDT_CLASSES } from '../src/services/mdtClassification.js';
@@ -124,6 +125,169 @@ test('fetchCoverFromObalkyKnih queries ObálkyKnih API and returns normalized co
     assert.equal(result.backlinkUrl, 'https://www.obalkyknih.cz/view?isbn=9788025703670');
     assert.equal(result.annotation, 'Skvělá kniha o poezii');
     assert.equal(result.rating, 85);
+  } finally {
+    globalThis.fetch = globalFetchBackup;
+  }
+});
+
+test('getDatabazeKnihUrl formats URL with ISBN, query or title', () => {
+  assert.equal(
+    getDatabazeKnihUrl({ isbn: '978-80-257-0367-0', title: 'R.U.R.' }),
+    'https://www.databazeknih.cz/search?q=9788025703670'
+  );
+  assert.equal(
+    getDatabazeKnihUrl({ title: 'Válka s mloky', authors: 'Karel Čapek' }),
+    'https://www.databazeknih.cz/search?q=V%C3%A1lka%20s%20mloky%20Karel%20%C4%8Capek'
+  );
+  assert.equal(
+    getDatabazeKnihUrl('Karel Čapek'),
+    'https://www.databazeknih.cz/search?q=Karel%20%C4%8Capek'
+  );
+  assert.equal(getDatabazeKnihUrl(null), 'https://www.databazeknih.cz');
+});
+
+test('searchBooks supports author query and queries Knihovny.cz author search', async () => {
+  const globalFetchBackup = globalThis.fetch;
+  const queriedUrls = [];
+
+  globalThis.fetch = async (url) => {
+    queriedUrls.push(url);
+    if (url.includes('knihovny.cz/api/v1/search') && url.includes('type=Author')) {
+      return {
+        ok: true,
+        json: async () => ({
+          resultCount: 1,
+          records: [{
+            id: 'mkp.author.1',
+            title: 'Krakatit',
+            authors: { primary: { 'Karel Čapek': [] } },
+            publishers: ['Aventinum'],
+            publicationDates: ['1924'],
+            isbns: ['9788025700001'],
+            formats: ['0/BOOKS/']
+          }]
+        })
+      };
+    }
+    if (url.includes('knihovny.cz/api/v1/search')) {
+      return {
+        ok: true,
+        json: async () => ({ resultCount: 0, records: [] })
+      };
+    }
+    return {
+      ok: true,
+      json: async () => ({ items: [], docs: [] })
+    };
+  };
+
+  try {
+    const results = await searchBooks('Karel Čapek');
+    assert.equal(results.length, 1);
+    assert.equal(results[0].title, 'Krakatit');
+    assert.equal(results[0].authors, 'Karel Čapek');
+    assert.equal(results[0].isbn, '9788025700001');
+    assert.ok(results[0].databazeKnihUrl.includes('databazeknih.cz'));
+
+    // Check that type=Author query was actually executed
+    const authorUrl = queriedUrls.find(u => u.includes('type=Author'));
+    assert.notEqual(authorUrl, undefined);
+  } finally {
+    globalThis.fetch = globalFetchBackup;
+  }
+});
+
+test('searchBooks author fallback to Google Books inauthor and Open Library author', async () => {
+  const globalFetchBackup = globalThis.fetch;
+  const queriedUrls = [];
+
+  globalThis.fetch = async (url) => {
+    queriedUrls.push(url);
+    if (url.includes('knihovny.cz')) {
+      return { ok: true, json: async () => ({ records: [] }) };
+    }
+    if (url.includes('googleapis.com') && url.includes('inauthor:')) {
+      return {
+        ok: true,
+        json: async () => ({
+          items: [{
+            id: 'gb-capek-1',
+            volumeInfo: {
+              title: 'Bílá nemoc',
+              authors: ['Karel Čapek'],
+              publisher: 'Borový',
+              publishedDate: '1937',
+              averageRating: 4.5,
+              ratingsCount: 20,
+              industryIdentifiers: [{ type: 'ISBN_13', identifier: '9788025700002' }]
+            }
+          }]
+        })
+      };
+    }
+    return { ok: true, json: async () => ({ items: [], docs: [] }) };
+  };
+
+  try {
+    const results = await searchBooks('Karel Čapek');
+    assert.equal(results.length, 1);
+    assert.equal(results[0].title, 'Bílá nemoc');
+    assert.equal(results[0].authors, 'Karel Čapek');
+    assert.equal(results[0].rating, 90); // 4.5 * 20 = 90%
+    assert.ok(results[0].databazeKnihUrl.includes('databazeknih.cz'));
+
+    const inauthorUrl = queriedUrls.find(u => u.includes('inauthor:'));
+    assert.notEqual(inauthorUrl, undefined);
+  } finally {
+    globalThis.fetch = globalFetchBackup;
+  }
+});
+
+test('searchBook enriches record with ObálkyKnih rating and annotation if available', async () => {
+  const sampleKnihovnyResp = {
+    resultCount: 1,
+    records: [{
+      id: 'knihovny-999',
+      title: 'Továrna na Absolutno',
+      authors: { primary: { 'Karel Čapek': [] } },
+      isbns: ['9788025700003'],
+      languages: ['cze'],
+      editions: ['Vydání 3.']
+    }],
+    status: 'OK'
+  };
+
+  const sampleObalkyResp = [
+    {
+      cover_preview510_url: 'https://cache.obalkyknih.cz/file/cover/1234/preview510',
+      backlink_url: 'https://www.obalkyknih.cz/view?isbn=9788025700003',
+      rating_avg100: '88',
+      annotation: { html: '<p>Román o vynálezu karburátoru.</p>' }
+    }
+  ];
+
+  const globalFetchBackup = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    if (url.includes('knihovny.cz/api/v1/search')) {
+      return { ok: true, json: async () => sampleKnihovnyResp };
+    }
+    if (url.includes('obalkyknih.cz/api/books')) {
+      return { ok: true, json: async () => sampleObalkyResp };
+    }
+    return { ok: false };
+  };
+
+  try {
+    const book = await searchBook('9788025700003');
+    assert.notEqual(book, null);
+    assert.equal(book.title, 'Továrna na Absolutno');
+    assert.equal(book.rating, 88);
+    assert.equal(book.annotation, 'Román o vynálezu karburátoru.');
+    assert.equal(book.description, 'Román o vynálezu karburátoru.');
+    assert.equal(book.language, 'cze');
+    assert.equal(book.edition, 'Vydání 3.');
+    assert.ok(book.databazeKnihUrl.includes('databazeknih.cz'));
+    assert.ok(book.knihovnyUrl.includes('knihovny.cz/Record/knihovny-999'));
   } finally {
     globalThis.fetch = globalFetchBackup;
   }

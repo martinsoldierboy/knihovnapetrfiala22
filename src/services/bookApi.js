@@ -153,7 +153,10 @@ const KNIHOVNY_FIELDS = [
   'isbns',
   'issns',
   'cnb',
-  'formats'
+  'formats',
+  'languages',
+  'editions',
+  'series'
 ];
 
 /**
@@ -255,6 +258,22 @@ export async function fetchFromKnihovnyCz(query) {
 /**
  * Format a raw Knihovny.cz record into a normalized Book object
  */
+/**
+ * Generates Databáze knih search URL for a book or query
+ */
+export function getDatabazeKnihUrl(bookOrQuery) {
+  if (!bookOrQuery) return 'https://www.databazeknih.cz';
+  if (typeof bookOrQuery === 'string') {
+    return `https://www.databazeknih.cz/search?q=${encodeURIComponent(bookOrQuery.trim())}`;
+  }
+  const cleanIsbn = normalizeToIsbn13(bookOrQuery.isbn);
+  if (cleanIsbn && /^\d{10,13}$/.test(cleanIsbn)) {
+    return `https://www.databazeknih.cz/search?q=${encodeURIComponent(cleanIsbn)}`;
+  }
+  const query = [bookOrQuery.title, bookOrQuery.authors].filter(Boolean).join(' ');
+  return `https://www.databazeknih.cz/search?q=${encodeURIComponent(query || 'kniha')}`;
+}
+
 export function formatKnihovnyRecord(rec, fallbackIsbn = '') {
   if (!rec) return null;
 
@@ -297,7 +316,10 @@ export function formatKnihovnyRecord(rec, fallbackIsbn = '') {
     ? `https://www.obalkyknih.cz/view?isbn=${cleanIsbn13}`
     : null;
 
-  return {
+  const languages = Array.isArray(rec.languages) && rec.languages.length > 0 ? rec.languages.join(', ') : (rec.language || '');
+  const edition = rec.edition || (Array.isArray(rec.editions) ? rec.editions[0] : '');
+
+  const resultBook = {
     id: rec.id || `knihovny-${Date.now()}-${Math.random()}`,
     title,
     authors,
@@ -305,25 +327,31 @@ export function formatKnihovnyRecord(rec, fallbackIsbn = '') {
     publishedDate,
     publisher: place ? `${publisher} (${place})`.replace(/^\s*\((.*?)\)$/, '$1') : publisher,
     description: physDesc ? `Fyzický popis: ${physDesc}` : 'Popis není k dispozici.',
+    physicalDescription: physDesc,
+    edition,
     coverImage,
     pageCount,
     categories: rec.formats?.join(', ') || '',
-    language: '',
+    language: languages,
     cnb: rec.cnb || '',
-    source: 'Knihovny.cz'
+    source: 'Knihovny.cz',
+    knihovnyUrl: rec.id ? `https://www.knihovny.cz/Record/${encodeURIComponent(rec.id)}` : null
   };
+
+  resultBook.databazeKnihUrl = getDatabazeKnihUrl(resultBook);
+  return resultBook;
 }
 
 /**
- * Fetch multiple records from Knihovny.cz
+ * Fetch multiple records from Knihovny.cz with configurable search type (AllFields or Author)
  */
-export async function searchKnihovnyCzList(query, limit = 10) {
+export async function searchKnihovnyCzList(query, limit = 10, type = 'AllFields') {
   if (!query || !query.trim()) return [];
 
   const isIsbn = isIsbnLike(query);
   const targetIsbn13 = isIsbn ? normalizeToIsbn13(query) : null;
   const searchLookfor = targetIsbn13 || normalizeIsbn(query) || query.trim();
-  const searchType = isIsbn ? 'ISN' : 'AllFields';
+  const searchType = isIsbn ? 'ISN' : type;
 
   const params = new URLSearchParams({
     lookfor: searchLookfor,
@@ -377,7 +405,7 @@ export function formatGoogleBooksItem(item, fallbackQuery = '') {
     ? book.imageLinks.thumbnail.replace('http://', 'https://')
     : null;
 
-  return {
+  const resultBook = {
     id: item.id || `gb-${Date.now()}-${Math.random()}`,
     title: book.title || 'Neznámý název',
     authors: book.authors ? book.authors.join(', ') : 'Neznámý autor',
@@ -389,21 +417,31 @@ export function formatGoogleBooksItem(item, fallbackQuery = '') {
     pageCount: book.pageCount || 0,
     categories: book.categories ? book.categories.join(', ') : '',
     language: book.language || '',
+    rating: book.averageRating ? Math.round(book.averageRating * 20) : null, // convert 5-star to percentage
+    ratingsCount: book.ratingsCount || null,
     source: 'Google Books'
   };
+
+  resultBook.databazeKnihUrl = getDatabazeKnihUrl(resultBook);
+  return resultBook;
 }
 
 /**
- * Search Google Books API for multiple records
+ * Search Google Books API for multiple records (supports general or author queries)
  */
-export async function searchGoogleBooksList(query, limit = 10) {
+export async function searchGoogleBooksList(query, limit = 10, isAuthorSearch = false) {
   if (!query || !query.trim()) return [];
 
   const clean = normalizeIsbn(query);
   const isIsbn = isIsbnLike(clean);
   const targetIsbn = isIsbn ? normalizeToIsbn13(clean) : clean;
 
-  const searchParam = isIsbn ? `isbn:${targetIsbn}` : encodeURIComponent(query);
+  const searchParam = isIsbn
+    ? `isbn:${targetIsbn}`
+    : isAuthorSearch
+      ? `inauthor:${encodeURIComponent(query.trim())}`
+      : encodeURIComponent(query);
+
   const url = `https://www.googleapis.com/books/v1/volumes?q=${searchParam}&maxResults=${Math.min(limit, 40)}`;
 
   try {
@@ -439,6 +477,61 @@ export async function fetchFromGoogleBooks(query) {
 /**
  * Search Open Library API
  */
+/**
+ * Format Open Library search doc into standardized book item
+ */
+export function formatOpenLibraryDoc(doc, fallbackQuery = '') {
+  if (!doc) return null;
+  const foundIsbn = doc.isbn ? doc.isbn[0] : (isIsbnLike(fallbackQuery) ? normalizeToIsbn13(fallbackQuery) : '');
+  const coverImage = doc.cover_i ? `https://covers.openlibrary.org/b/id/${doc.cover_i}-M.jpg` : null;
+
+  const resultBook = {
+    id: doc.key || `ol-${Date.now()}-${Math.random()}`,
+    title: doc.title || 'Neznámý název',
+    authors: doc.author_name ? doc.author_name.join(', ') : 'Neznámý autor',
+    isbn: foundIsbn,
+    publishedDate: doc.first_publish_year ? String(doc.first_publish_year) : '',
+    publisher: doc.publisher ? doc.publisher[0] : '',
+    description: 'Popis není k dispozici v vyhledávání Open Library.',
+    coverImage: coverImage,
+    pageCount: doc.number_of_pages_median || 0,
+    categories: doc.subject ? doc.subject.slice(0, 3).join(', ') : '',
+    language: doc.language ? doc.language[0] : '',
+    rating: doc.ratings_average ? Math.round(doc.ratings_average * 20) : null,
+    source: 'Open Library'
+  };
+
+  resultBook.databazeKnihUrl = getDatabazeKnihUrl(resultBook);
+  return resultBook;
+}
+
+/**
+ * Search Open Library API by general query or author
+ */
+export async function searchOpenLibraryList(query, limit = 10, isAuthorSearch = false) {
+  if (!query || !query.trim()) return [];
+
+  const searchParam = isAuthorSearch
+    ? `author=${encodeURIComponent(query.trim())}`
+    : `q=${encodeURIComponent(query.trim())}`;
+  const searchUrl = `https://openlibrary.org/search.json?${searchParam}&limit=${Math.min(limit, 20)}`;
+
+  try {
+    const searchResp = await fetch(searchUrl);
+    if (!searchResp.ok) return [];
+    const searchData = await searchResp.json();
+    if (!searchData.docs || !Array.isArray(searchData.docs)) return [];
+
+    return searchData.docs.map(doc => formatOpenLibraryDoc(doc, query)).filter(Boolean);
+  } catch (error) {
+    console.error('Chyba při vyhledávání v Open Library API:', error);
+    return [];
+  }
+}
+
+/**
+ * Search Open Library API (single record)
+ */
 export async function fetchFromOpenLibrary(query) {
   const clean = normalizeIsbn(query);
   const targetIsbn = isIsbnLike(clean) ? normalizeToIsbn13(clean) : clean;
@@ -453,7 +546,7 @@ export async function fetchFromOpenLibrary(query) {
         const key2 = `ISBN:${targetIsbn}`;
         const item = data[key1] || data[key2];
         if (item) {
-          return {
+          const resultBook = {
             id: `ol-${clean}`,
             title: item.title || 'Neznámý název',
             authors: item.authors ? item.authors.map(a => a.name).join(', ') : 'Neznámý autor',
@@ -467,36 +560,15 @@ export async function fetchFromOpenLibrary(query) {
             language: '',
             source: 'Open Library'
           };
+          resultBook.databazeKnihUrl = getDatabazeKnihUrl(resultBook);
+          return resultBook;
         }
       }
     }
 
     // Fallback general search query
-    const searchUrl = `https://openlibrary.org/search.json?q=${encodeURIComponent(query)}&limit=1`;
-    const searchResp = await fetch(searchUrl);
-    if (!searchResp.ok) return null;
-    const searchData = await searchResp.json();
-
-    if (!searchData.docs || searchData.docs.length === 0) return null;
-
-    const doc = searchData.docs[0];
-    const foundIsbn = doc.isbn ? doc.isbn[0] : clean;
-    const coverImage = doc.cover_i ? `https://covers.openlibrary.org/b/id/${doc.cover_i}-M.jpg` : null;
-
-    return {
-      id: doc.key || `ol-${Date.now()}`,
-      title: doc.title || 'Neznámý název',
-      authors: doc.author_name ? doc.author_name.join(', ') : 'Neznámý autor',
-      isbn: foundIsbn,
-      publishedDate: doc.first_publish_year ? String(doc.first_publish_year) : '',
-      publisher: doc.publisher ? doc.publisher[0] : '',
-      description: 'Popis není k dispozici v vyhledávání Open Library.',
-      coverImage: coverImage,
-      pageCount: doc.number_of_pages_median || 0,
-      categories: doc.subject ? doc.subject.slice(0, 3).join(', ') : '',
-      language: doc.language ? doc.language[0] : '',
-      source: 'Open Library'
-    };
+    const results = await searchOpenLibraryList(query, 1);
+    return results.length > 0 ? results[0] : null;
   } catch (error) {
     console.error('Chyba při načítání z Open Library API:', error);
     return null;
@@ -636,6 +708,7 @@ export async function searchBooks(query, { limit = 12 } = {}) {
   if (!query || !query.trim()) return [];
 
   const trimmedQuery = query.trim();
+  const isIsbn = isIsbnLike(trimmedQuery);
   const results = [];
   const seenIsbns = new Set();
   const seenFingerprints = new Set();
@@ -664,30 +737,67 @@ export async function searchBooks(query, { limit = 12 } = {}) {
       book.coverImage = `https://www.obalkyknih.cz/view?isbn=${cleanIsbn}`;
     }
 
+    // Ensure databazeKnihUrl exists
+    if (!book.databazeKnihUrl) {
+      book.databazeKnihUrl = getDatabazeKnihUrl(book);
+    }
+
     results.push(book);
   };
 
-  // 1. Fetch from Knihovny.cz
-  const knihovnyResults = await searchKnihovnyCzList(trimmedQuery, limit);
+  // 1. Fetch from Knihovny.cz (general search)
+  const knihovnyResults = await searchKnihovnyCzList(trimmedQuery, limit, 'AllFields');
   for (const book of knihovnyResults) {
     addUnique(book);
     if (results.length >= limit) break;
   }
 
-  // 2. If results are few or empty, supplement from Google Books
+  // 2. If not ISBN, also query Knihovny.cz with Author search type to catch author queries
+  // (e.g. "Karel Čapek", "Stephen King", "Tolkien", "Kundera")
+  if (!isIsbn && results.length < limit) {
+    try {
+      const authorResults = await searchKnihovnyCzList(trimmedQuery, limit - results.length, 'Author');
+      for (const book of authorResults) {
+        addUnique(book);
+        if (results.length >= limit) break;
+      }
+    } catch (e) {
+      // Continue if author search fails
+    }
+  }
+
+  // 3. If results are few or empty, supplement from Google Books
   if (results.length < limit) {
-    const gbResults = await searchGoogleBooksList(trimmedQuery, limit - results.length);
+    const gbResults = await searchGoogleBooksList(trimmedQuery, limit - results.length, false);
     for (const book of gbResults) {
       addUnique(book);
       if (results.length >= limit) break;
     }
+
+    // If query is author name, also search Google Books by author
+    if (!isIsbn && results.length < limit) {
+      const gbAuthorResults = await searchGoogleBooksList(trimmedQuery, limit - results.length, true);
+      for (const book of gbAuthorResults) {
+        addUnique(book);
+        if (results.length >= limit) break;
+      }
+    }
   }
 
-  // 3. If still empty and query is not ISBN, try Open Library single query fallback
-  if (results.length === 0) {
-    const olResult = await fetchFromOpenLibrary(trimmedQuery);
-    if (olResult) {
-      addUnique(olResult);
+  // 4. If still under limit and query is not ISBN, search Open Library (both general and author)
+  if (!isIsbn && results.length < limit) {
+    const olAuthorResults = await searchOpenLibraryList(trimmedQuery, limit - results.length, true);
+    for (const book of olAuthorResults) {
+      addUnique(book);
+      if (results.length >= limit) break;
+    }
+
+    if (results.length === 0) {
+      const olResults = await searchOpenLibraryList(trimmedQuery, limit - results.length, false);
+      for (const book of olResults) {
+        addUnique(book);
+        if (results.length >= limit) break;
+      }
     }
   }
 
@@ -717,12 +827,23 @@ export async function searchBook(query) {
 
   if (!bookResult) return null;
 
-  // Attempt to fetch cover from ObalkyKnih.cz if not yet set or to enrich Czech book covers
+  // Attempt to fetch cover and enriched info from ObalkyKnih.cz if not yet set or to enrich Czech book covers
   if (bookResult.isbn || bookResult.cnb) {
     const obalkyData = await fetchCoverFromObalkyKnih(bookResult.isbn, bookResult.cnb);
-    if (obalkyData?.coverUrl) {
-      bookResult.coverImage = obalkyData.coverUrl;
-      bookResult.obalkyKnihUrl = obalkyData.backlinkUrl;
+    if (obalkyData) {
+      if (obalkyData.coverUrl) {
+        bookResult.coverImage = obalkyData.coverUrl;
+      }
+      if (obalkyData.backlinkUrl) {
+        bookResult.obalkyKnihUrl = obalkyData.backlinkUrl;
+      }
+      if (obalkyData.rating && !bookResult.rating) {
+        bookResult.rating = obalkyData.rating;
+      }
+      if (obalkyData.annotation && (!bookResult.description || bookResult.description.startsWith('Fyzický popis:') || bookResult.description.includes('Popis není k dispozici'))) {
+        bookResult.annotation = obalkyData.annotation;
+        bookResult.description = obalkyData.annotation;
+      }
     }
   }
 
@@ -740,6 +861,11 @@ export async function searchBook(query) {
     if (cleanIsbn) {
       bookResult.obalkyKnihUrl = `https://www.obalkyknih.cz/view?isbn=${cleanIsbn}`;
     }
+  }
+
+  // Ensure Databáze knih URL is provided
+  if (!bookResult.databazeKnihUrl) {
+    bookResult.databazeKnihUrl = getDatabazeKnihUrl(bookResult);
   }
 
   return bookResult;
